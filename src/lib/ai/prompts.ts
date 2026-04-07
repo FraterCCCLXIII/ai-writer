@@ -44,6 +44,19 @@ export function chatUserPayload(input: {
 }): string {
   const { message, context } = input;
   const sel = context.selectedText?.trim();
+  const snippets = context.relevantResearchSnippets?.filter(
+    (s) => s.title.trim() || s.excerpt.trim(),
+  );
+  const researchBlock =
+    snippets && snippets.length > 0
+      ? `## Research notes (ranked by relevance to the author's current writing)\n${snippets
+          .map(
+            (s, i) =>
+              `### ${i + 1}. ${s.title || "Untitled"}\n"""${s.excerpt.slice(0, 6_000)}"""`,
+          )
+          .join("\n\n")}`
+      : null;
+
   const header = [
     context.chapterTitle ? `Current chapter: ${context.chapterTitle}` : null,
     sel
@@ -52,6 +65,7 @@ export function chatUserPayload(input: {
     context.chapterPlainText
       ? `## Full chapter text (may be truncated for length)\n"""${context.chapterPlainText.slice(0, 80_000)}"""`
       : null,
+    researchBlock,
   ]
     .filter(Boolean)
     .join("\n\n");

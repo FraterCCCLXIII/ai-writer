@@ -14,5 +14,11 @@ export function parsePersistedWorkspace(
   if (typeof proj.id !== "string" || typeof proj.title !== "string")
     return null;
   if (!Array.isArray(o.chapters) || o.chapters.length === 0) return null;
+  if (
+    o.researchDocuments !== undefined &&
+    !Array.isArray(o.researchDocuments)
+  ) {
+    return null;
+  }
   return json as PersistedWorkspace;
 }

@@ -10,7 +10,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "electron:dev": "concurrently -k \"cross-env ELECTRON_DEV=1 next dev --webpack\" \"wait-on http://localhost:3000 && cross-env ELECTRON_DEV=1 electron electron/main.cjs\"",
+    "electron": "npm run electron:dev",
+    "electron:dev": "concurrently -k \"cross-env ELECTRON_DEV=1 next dev --webpack\" \"wait-on http://127.0.0.1:3000 && cross-env ELECTRON_DEV=1 electron electron/main.cjs\"",
     "electron:pack": "next build && node scripts/prepare-standalone-electron.cjs && electron-builder --dir",
     "electron:dist": "next build && node scripts/prepare-standalone-electron.cjs && electron-builder"
   },
@@ -25,36 +26,47 @@
     "@radix-ui/react-slot": "^1.1.1",
     "@radix-ui/react-tabs": "^1.1.2",
     "@radix-ui/react-tooltip": "^1.1.6",
+    "@types/turndown": "^5.0.6",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.0.4",
+    "docx": "^9.6.1",
+    "dompurify": "^3.3.3",
+    "file-saver": "^2.0.5",
     "framer-motion": "^11.15.0",
     "idb": "^8.0.2",
     "lowlight": "^3.1.0",
     "lucide-react": "^0.468.0",
+    "mammoth": "^1.12.0",
+    "marked": "^18.0.0",
     "next": "16.2.2",
     "novel": "^1.0.2",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "rtf.js": "^3.0.9",
     "sonner": "^1.7.1",
     "tailwind-merge": "^2.6.0",
+    "turndown": "^7.2.4",
     "use-debounce": "^10.0.4",
+    "word-extractor": "^1.0.4",
     "zustand": "^5.0.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@tailwindcss/typography": "^0.5.16",
+    "@types/dompurify": "^3.0.5",
+    "@types/file-saver": "^2.0.7",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.2",
-    "tailwindcss": "^4",
-    "typescript": "^5",
     "concurrently": "^9.1.2",
     "cross-env": "^7.0.3",
     "electron": "^35.0.0",
     "electron-builder": "^26.0.0",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.2",
+    "tailwindcss": "^4",
+    "typescript": "^5",
     "wait-on": "^8.0.3"
   },
   "build": {
@@ -71,18 +83,27 @@
       {
         "from": ".next/standalone",
         "to": "standalone",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "mac": {
       "category": "public.app-category.productivity",
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
     "win": {
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ]
     },
     "linux": {
-      "target": ["AppImage"]
+      "target": [
+        "AppImage"
+      ]
     }
   }
 }

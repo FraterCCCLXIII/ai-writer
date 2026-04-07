@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Minus, Square, X } from "lucide-react";
+import { AppMenu } from "@/components/app-menu";
+import { DocumentExportMenu } from "@/components/document-export/document-export-menu";
+import { useProjectStore } from "@/store/project-store";
 import { isElectronApp } from "@/lib/electron-bridge";
 import { cn } from "@/lib/utils";
 
@@ -111,12 +114,15 @@ export type ElectronTitleBarProps = {
  * Desktop-only window frame: traffic lights on macOS (left), Win/Linux controls on the right.
  */
 export function ElectronTitleBar({ title = "Manuscript", className }: ElectronTitleBarProps) {
-  const [mounted, setMounted] = useState(false);
+  const showExport = useProjectStore(
+    (s) =>
+      s.workspaceScreen === "editor" &&
+      s.project.editorLayout === "singleDocument",
+  );
   const [isMac, setIsMac] = useState(false);
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
     const api = window.electronAPI;
     if (!api?.platform) return;
     setIsMac(api.platform === "darwin");
@@ -130,22 +136,26 @@ export function ElectronTitleBar({ title = "Manuscript", className }: ElectronTi
   }, []);
 
   useEffect(() => {
-    if (!mounted || !isElectronApp()) return;
+    if (!isElectronApp()) return;
     return subscribe();
-  }, [mounted, subscribe]);
+  }, [subscribe]);
 
   const close = () => void window.electronAPI?.windowClose?.();
   const minimize = () => void window.electronAPI?.windowMinimize?.();
   const toggleMax = () => void window.electronAPI?.windowToggleMaximize?.();
 
-  if (!mounted || !isElectronApp() || !window.electronAPI?.platform) {
+  if (!isElectronApp()) {
     return null;
   }
 
+  /**
+   * Frameless window: only the center strip uses `app-region-drag`. Putting drag on the
+   * whole header makes Electron swallow clicks on traffic lights, menus, and window buttons.
+   */
   return (
     <header
       className={cn(
-        "app-region-drag z-[60] flex shrink-0 items-center border-b border-border bg-background",
+        "sticky top-0 z-[60] flex shrink-0 items-center border-b border-border bg-background",
         TITLEBAR_H,
         className,
       )}
@@ -158,20 +168,31 @@ export function ElectronTitleBar({ title = "Manuscript", className }: ElectronTi
             onMaximize={toggleMax}
           />
           <div
-            className="flex min-w-0 flex-1 items-center justify-center px-3 text-center text-xs font-medium text-muted-foreground"
+            className="app-region-drag flex min-w-0 flex-1 cursor-default items-center justify-center px-3 text-center text-xs font-medium text-muted-foreground"
             onDoubleClick={toggleMax}
           >
             <span className="truncate">{title}</span>
           </div>
-          <div className="w-[72px] shrink-0" aria-hidden />
+          <div className="app-region-no-drag flex max-w-[min(280px,42vw)] shrink-0 items-center justify-end gap-1 pr-1">
+            {showExport ? (
+              <DocumentExportMenu triggerClassName="h-7 gap-1 px-2 text-xs" />
+            ) : null}
+            <AppMenu triggerClassName="h-7 w-7" />
+          </div>
         </>
       ) : (
         <>
           <div
-            className="flex min-w-0 flex-1 items-center px-3 text-xs font-medium text-muted-foreground"
+            className="app-region-drag flex min-w-0 flex-1 cursor-default items-center px-3 text-xs font-medium text-muted-foreground"
             onDoubleClick={toggleMax}
           >
             <span className="truncate">{title}</span>
+          </div>
+          <div className="app-region-no-drag flex shrink-0 items-center gap-1 pr-0.5">
+            {showExport ? (
+              <DocumentExportMenu triggerClassName="h-7 gap-1 px-2 text-xs" />
+            ) : null}
+            <AppMenu triggerClassName="h-7 w-7" />
           </div>
           <WindowsControls
             maximized={maximized}

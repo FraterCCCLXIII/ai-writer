@@ -7,10 +7,30 @@ export type Chapter = {
   order: number;
 };
 
+/** Manuscript = chapter list; single document = one editable page (opened from a file). */
+export type EditorLayout = "manuscript" | "singleDocument";
+
 export type ProjectMeta = {
   id: string;
   title: string;
   description: string;
+  /**
+   * Omitted or `manuscript` = multi-chapter workspace.
+   * `singleDocument` = one editor surface, no chapter sidebar.
+   */
+  editorLayout?: EditorLayout;
+  /** Original filename when opened via Open file (used for export default name). */
+  singleFileName?: string;
+};
+
+/** Reference notes and imported files; stored in the workspace, separate from manuscript chapters. */
+export type ResearchDocument = {
+  id: string;
+  title: string;
+  content: JSONContent;
+  order: number;
+  /** Set when created via file import. */
+  sourceFileName?: string;
 };
 
 export type PersistedWorkspace = {
@@ -21,6 +41,8 @@ export type PersistedWorkspace = {
   openTabs: string[];
   chatMessages: ChatMessage[];
   updatedAt: number;
+  /** Omitted in older saves; treat as []. */
+  researchDocuments?: ResearchDocument[];
 };
 
 export type ChatMessage = {

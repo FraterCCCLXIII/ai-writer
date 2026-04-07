@@ -13,6 +13,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import type { InlineAction } from "@/lib/ai/types";
 import { plainTextToInsertContent } from "@/lib/plain-text-insert";
+import { getAiOverridesForRequest } from "@/lib/ai-settings";
 
 export type InlineAiRequest = {
   id: string;
@@ -73,6 +74,7 @@ export function InlineAiPanel({
             action: request.action,
             selectedText: request.originalText,
             fullChapterText,
+            ...getAiOverridesForRequest(),
           }),
           signal: abortRef.current?.signal,
         });

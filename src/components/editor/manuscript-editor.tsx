@@ -40,15 +40,20 @@ type Props = {
   chapterId: string;
   initialContent: JSONContent;
   focusMode?: boolean;
+  /** Research notes use a separate store slice; chat/insert bridges are disabled. */
+  surface?: "chapter" | "research";
 };
 
 export function ManuscriptEditor({
   chapterId,
   initialContent,
   focusMode = false,
+  surface = "chapter",
 }: Props) {
   const updateChapterContent = useProjectStore((s) => s.updateChapterContent);
+  const updateResearchContent = useProjectStore((s) => s.updateResearchContent);
   const setEditorContext = useProjectStore((s) => s.setEditorContext);
+  const isResearch = surface === "research";
 
   const [inlineRequest, setInlineRequest] = useState<InlineAiRequest | null>(
     null,
@@ -92,7 +97,11 @@ export function ManuscriptEditor({
 
   const debouncedSave = useDebouncedCallback(
     (editor: Editor) => {
-      updateChapterContent(chapterId, editor.getJSON());
+      if (isResearch) {
+        updateResearchContent(chapterId, editor.getJSON());
+      } else {
+        updateChapterContent(chapterId, editor.getJSON());
+      }
     },
     500,
   );
@@ -126,8 +135,8 @@ export function ManuscriptEditor({
           slotAfter={<ImageResizer />}
           className={
             focusMode
-              ? "relative min-h-dvh w-full max-w-none"
-              : "relative min-h-[calc(100dvh-3rem)] w-full max-w-none"
+              ? "relative flex min-h-dvh w-full max-w-none flex-col"
+              : "relative flex min-h-full w-full max-w-none flex-col"
           }
           initialContent={initialContent}
           extensions={extensions}
@@ -153,6 +162,7 @@ export function ManuscriptEditor({
             debouncedSave(editor);
           }}
           onFocus={({ editor }) => {
+            if (isResearch) return;
             const ctx = useProjectStore.getState().editorContext;
             if (!ctx || ctx.chapterId !== chapterId) return;
             const docSize = editor.state.doc.content.size;
@@ -163,6 +173,7 @@ export function ManuscriptEditor({
             }
           }}
           onSelectionUpdate={({ editor }) => {
+            if (isResearch) return;
             const slice = getSelectionSlice(editor);
             if (slice) {
               setEditorContext({
@@ -202,9 +213,13 @@ export function ManuscriptEditor({
             </EditorCommandList>
           </EditorCommand>
           <FormatAndAiBubble onInline={onInlineFromBubble} />
-          <ContextHighlightBridge chapterId={chapterId} />
-          <RevisionReviewBridge chapterId={chapterId} />
-          <InsertFromChatBridge />
+          {!isResearch ? (
+            <>
+              <ContextHighlightBridge chapterId={chapterId} />
+              <RevisionReviewBridge chapterId={chapterId} />
+              <InsertFromChatBridge />
+            </>
+          ) : null}
         </EditorContent>
       </EditorRoot>
       <InlineAiPanel

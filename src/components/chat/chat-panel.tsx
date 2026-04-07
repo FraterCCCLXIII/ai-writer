@@ -16,6 +16,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useProjectStore } from "@/store/project-store";
 import { jsonToPlainText } from "@/lib/tiptap-plain-text";
 import { dispatchInsertToEditor } from "@/lib/editor-insert-events";
+import { getAiOverridesForRequest } from "@/lib/ai-settings";
+import {
+  getLiveNotesAnchorParams,
+  relevantResearchSnippetsForChat,
+} from "@/lib/research/live-notes";
+import { LiveNotesPanel } from "@/components/chat/live-notes-panel";
 
 export function ChatPanel() {
   const chatMessages = useProjectStore((s) => s.chatMessages);
@@ -27,6 +33,7 @@ export function ChatPanel() {
   const setPendingRevision = useProjectStore((s) => s.setPendingRevision);
   const clearChat = useProjectStore((s) => s.clearChat);
 
+  const [chatTab, setChatTab] = useState("chat");
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   /** Local buffer so the UI updates every chunk (Zustand + async stream can batch poorly). */
@@ -57,6 +64,20 @@ export function ChatPanel() {
     const chapterForContext = snap.chapters.find(
       (c) => c.id === snap.activeChapterId,
     );
+    const { anchor: liveAnchor, excludeResearchIds } =
+      getLiveNotesAnchorParams({
+        chapters: snap.chapters,
+        activeChapterId: snap.activeChapterId,
+        researchDocuments: snap.researchDocuments,
+        activeResearchId: snap.activeResearchId,
+        editorContext: snap.editorContext,
+      });
+    const relevantResearchSnippets = relevantResearchSnippetsForChat(
+      liveAnchor,
+      snap.researchDocuments,
+      excludeResearchIds,
+      6,
+    );
     setInput("");
     appendChatMessage({ role: "user", content: text });
     const assistant = appendChatMessage({ role: "assistant", content: "" });
@@ -78,7 +99,9 @@ export function ChatPanel() {
             chapterPlainText: chapterForContext
               ? jsonToPlainText(chapterForContext.content)
               : "",
+            relevantResearchSnippets,
           },
+          ...getAiOverridesForRequest(),
         }),
         signal: abortRef.current.signal,
       });
@@ -143,11 +166,18 @@ export function ChatPanel() {
 
   return (
     <div className="flex h-full min-h-0 flex-col border-l border-border bg-background">
-      <Tabs defaultValue="chat" className="flex min-h-0 flex-1 flex-col">
+      <Tabs
+        value={chatTab}
+        onValueChange={setChatTab}
+        className="flex min-h-0 flex-1 flex-col"
+      >
         <div className="sticky top-0 z-20 flex shrink-0 items-center justify-between border-b border-border bg-background px-3 pt-3">
-          <TabsList className="h-8">
+          <TabsList className="h-8 max-w-[min(100%,18rem)] flex-wrap gap-0.5 sm:max-w-none">
             <TabsTrigger value="chat" className="text-xs">
               Chat
+            </TabsTrigger>
+            <TabsTrigger value="live-notes" className="text-xs">
+              Live Notes
             </TabsTrigger>
             <TabsTrigger value="review" className="text-xs">
               Review
@@ -156,14 +186,16 @@ export function ChatPanel() {
               Audio
             </TabsTrigger>
           </TabsList>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs text-muted-foreground"
-            onClick={() => clearChat()}
-          >
-            Clear
-          </Button>
+          {chatTab === "chat" ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 shrink-0 text-xs text-muted-foreground"
+              onClick={() => clearChat()}
+            >
+              Clear
+            </Button>
+          ) : null}
         </div>
 
         <TabsContent
@@ -350,6 +382,17 @@ export function ChatPanel() {
               ) : null}
             </div>
           </div>
+        </TabsContent>
+
+        <TabsContent
+          value="live-notes"
+          className="chat-scroll mt-0 flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-4 pt-4 data-[state=inactive]:hidden"
+        >
+          <p className="mb-3 text-xs text-muted-foreground">
+            Research excerpts ranked by overlap with your current writing
+            (selection, or the last stretch of the open document).
+          </p>
+          <LiveNotesPanel />
         </TabsContent>
 
         <TabsContent

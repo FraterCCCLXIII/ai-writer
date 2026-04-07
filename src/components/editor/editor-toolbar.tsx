@@ -81,7 +81,7 @@ export function EditorToolbar({ onInline }: Props) {
         : "Paragraph";
 
   return (
-    <div className="sticky top-12 z-30 flex w-full min-h-10 justify-center border-b border-border bg-background/95 px-2 py-1.5 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+    <div className="sticky top-0 z-40 flex min-h-12 w-full shrink-0 items-center justify-center border-b border-border bg-background px-2">
       <div
         role="toolbar"
         aria-label="Formatting"

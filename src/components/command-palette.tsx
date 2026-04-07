@@ -5,6 +5,7 @@ import {
   BookPlus,
   Eye,
   EyeOff,
+  FileText,
   FolderOpen,
   Home,
   MessageSquare,
@@ -33,6 +34,7 @@ export function CommandPalette() {
   const focusMode = useProjectStore((s) => s.focusMode);
   const goHome = useProjectStore((s) => s.goHome);
   const openFolderProject = useProjectStore((s) => s.openFolderProject);
+  const requestFileImport = useProjectStore((s) => s.requestFileImport);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -89,6 +91,21 @@ export function CommandPalette() {
                   Open: {c.title}
                 </Command.Item>
               ))}
+            </Command.Group>
+            <Command.Group
+              heading="Documents"
+              className="mt-2 text-xs font-medium text-muted-foreground"
+            >
+              <Command.Item
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-muted"
+                onSelect={() => {
+                  requestFileImport();
+                  setOpen(false);
+                }}
+              >
+                <FileText className="h-4 w-4" />
+                Open file…
+              </Command.Item>
             </Command.Group>
             {isElectronApp() ? (
               <Command.Group

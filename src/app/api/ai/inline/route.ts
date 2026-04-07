@@ -1,5 +1,6 @@
 import { inlineSystemPrompt, inlineUserPayload } from "@/lib/ai/prompts";
 import { streamChatCompletion } from "@/lib/ai/openai-compatible";
+import { resolveOpenAiFromRequest } from "@/lib/ai/server-config";
 import type { InlineAction } from "@/lib/ai/types";
 
 export const runtime = "nodejs";
@@ -20,6 +21,9 @@ export async function POST(req: Request) {
     selectedText?: string;
     fullChapterText?: string;
     extra?: string;
+    openaiApiKey?: string;
+    openaiBaseUrl?: string;
+    openaiModel?: string;
   };
 
   const action = body.action;
@@ -32,10 +36,7 @@ export async function POST(req: Request) {
     return Response.json({ error: "selectedText required" }, { status: 400 });
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  const baseUrl =
-    process.env.OPENAI_BASE_URL?.replace(/\/$/, "") ?? "https://api.openai.com/v1";
-  const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+  const { apiKey, baseUrl, model } = resolveOpenAiFromRequest(body);
 
   if (!apiKey) {
     return Response.json(

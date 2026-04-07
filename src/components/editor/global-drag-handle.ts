@@ -12,6 +12,7 @@ import {
 import { Fragment, Slice } from "@tiptap/pm/model";
 import type { EditorView } from "@tiptap/pm/view";
 import * as pmView from "@tiptap/pm/view";
+import { getScrollableAncestor } from "@/lib/scroll-parent";
 
 function getPmView() {
   try {
@@ -232,11 +233,21 @@ export function DragHandlePlugin(
       dragHandleElement.addEventListener("dragstart", onDragHandleDragStart);
       function onDragHandleDrag(e: DragEvent) {
         hideDragHandle();
-        const scrollY = window.scrollY;
-        if (e.clientY < options.scrollTreshold) {
-          window.scrollTo({ top: scrollY - 30, behavior: "smooth" });
-        } else if (window.innerHeight - e.clientY < options.scrollTreshold) {
-          window.scrollTo({ top: scrollY + 30, behavior: "smooth" });
+        const root = getScrollableAncestor(view.dom);
+        if (root) {
+          const top = root.scrollTop;
+          if (e.clientY < options.scrollTreshold) {
+            root.scrollTo({ top: top - 30, behavior: "smooth" });
+          } else if (window.innerHeight - e.clientY < options.scrollTreshold) {
+            root.scrollTo({ top: top + 30, behavior: "smooth" });
+          }
+        } else {
+          const scrollY = window.scrollY;
+          if (e.clientY < options.scrollTreshold) {
+            window.scrollTo({ top: scrollY - 30, behavior: "smooth" });
+          } else if (window.innerHeight - e.clientY < options.scrollTreshold) {
+            window.scrollTo({ top: scrollY + 30, behavior: "smooth" });
+          }
         }
       }
       dragHandleElement.addEventListener("drag", onDragHandleDrag);

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { toast } from "sonner";
 import type { JSONContent } from "novel";
 import type {
   Chapter,
@@ -6,6 +7,7 @@ import type {
   PersistedWorkspace,
   ProjectIndexEntry,
   ProjectMeta,
+  ResearchDocument,
 } from "@/documents/types";
 import {
   loadProjectIndex,
@@ -31,6 +33,7 @@ function snapshotFromState(state: {
   activeChapterId: string | null;
   openTabs: string[];
   chatMessages: ChatMessage[];
+  researchDocuments: ResearchDocument[];
 }): PersistedWorkspace {
   return {
     version: 1,
@@ -39,6 +42,7 @@ function snapshotFromState(state: {
     activeChapterId: state.activeChapterId,
     openTabs: state.openTabs,
     chatMessages: state.chatMessages,
+    researchDocuments: state.researchDocuments,
     updatedAt: Date.now(),
   };
 }
@@ -96,6 +100,9 @@ type ProjectState = {
     replacementText: string;
     assistantMessageId: string;
   } | null;
+  /** Reference notes (left sidebar); when set, main editor shows this instead of the active chapter. */
+  researchDocuments: ResearchDocument[];
+  activeResearchId: string | null;
 
   setProjectField: (patch: Partial<ProjectMeta>) => void;
   selectChapter: (id: string) => void;
@@ -104,6 +111,12 @@ type ProjectState = {
   removeChapter: (id: string) => void;
   reorderChapters: (orderedIds: string[]) => void;
   updateChapterContent: (id: string, content: JSONContent) => void;
+  addResearchDocument: () => void;
+  importResearchDocument: (file: File) => Promise<void>;
+  renameResearchDocument: (id: string, title: string) => void;
+  removeResearchDocument: (id: string) => void;
+  selectResearchDocument: (id: string) => void;
+  updateResearchContent: (id: string, content: JSONContent) => void;
   openTab: (id: string) => void;
   closeTab: (id: string) => void;
   appendChatMessage: (msg: Omit<ChatMessage, "id" | "createdAt">) => ChatMessage;
@@ -137,6 +150,7 @@ type ProjectState = {
     activeChapterId: string | null;
     openTabs: string[];
     chatMessages: ChatMessage[];
+    researchDocuments?: ResearchDocument[];
   }) => void;
   setRecentProjectsFromIndex: (entries: ProjectIndexEntry[]) => void;
   startNewProject: () => void;
@@ -149,6 +163,12 @@ type ProjectState = {
   /** Electron: pick a folder; load existing workspace file or create a new project there. */
   openFolderProject: () => Promise<void>;
   goHome: () => void;
+
+  /** Increments so `FileImportHost` opens the hidden file picker. */
+  fileImportPickRequest: number;
+  requestFileImport: () => void;
+  /** Import a non-workspace file as a single editable document. */
+  openImportedFile: (file: File) => Promise<void>;
 };
 
 export const useProjectStore = create<ProjectState>((set, get) => {
@@ -172,6 +192,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
   return {
     recentProjects: [],
     activeFolderPath: null,
+    fileImportPickRequest: 0,
     workspaceScreen: "home",
     project: defaults.project,
     chapters: defaults.chapters,
@@ -183,6 +204,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     rightSidebarOpen: true,
     editorContext: null,
     pendingRevision: null,
+    researchDocuments: [],
+    activeResearchId: null,
 
     setProjectField: (patch) => {
       set((s) => ({ project: { ...s.project, ...patch } }));
@@ -192,6 +215,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     selectChapter: (id) => {
       set((s) => ({
         activeChapterId: id,
+        activeResearchId: null,
         openTabs: s.openTabs.includes(id) ? s.openTabs : [...s.openTabs, id],
         editorContext:
           s.editorContext?.chapterId === id ? s.editorContext : null,
@@ -202,6 +226,10 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     },
 
     addChapter: () => {
+      if (get().project.editorLayout === "singleDocument") {
+        toast.message("Switch to a manuscript project to add chapters.");
+        return;
+      }
       const nextOrder =
         get().chapters.reduce((m, c) => Math.max(m, c.order), -1) + 1;
       const ch: Chapter = {
@@ -213,6 +241,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       set((s) => ({
         chapters: [...s.chapters, ch].sort((a, b) => a.order - b.order),
         activeChapterId: ch.id,
+        activeResearchId: null,
         openTabs: [...s.openTabs, ch.id],
         editorContext: null,
         pendingRevision: null,
@@ -228,6 +257,10 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     },
 
     removeChapter: (id) => {
+      if (get().project.editorLayout === "singleDocument") {
+        toast.message("Use a manuscript project to manage multiple chapters.");
+        return;
+      }
       set((s) => {
         const remaining = s.chapters.filter((c) => c.id !== id);
         if (remaining.length === 0) {
@@ -276,10 +309,102 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       schedulePersist();
     },
 
+    addResearchDocument: () => {
+      const s = get();
+      const nextOrder =
+        s.researchDocuments.reduce((m, d) => Math.max(m, d.order), -1) + 1;
+      const doc: ResearchDocument = {
+        id: createId(),
+        title: `Research ${nextOrder + 1}`,
+        content: emptyDoc,
+        order: nextOrder,
+      };
+      set({
+        researchDocuments: [...s.researchDocuments, doc].sort(
+          (a, b) => a.order - b.order,
+        ),
+        activeResearchId: doc.id,
+        editorContext: null,
+        pendingRevision: null,
+      });
+      schedulePersist();
+    },
+
+    importResearchDocument: async (file: File) => {
+      const { importFileToEditorContent } = await import(
+        "@/lib/document-import/import-file-to-editor"
+      );
+      const content = await importFileToEditorContent(file);
+      const base =
+        file.name.replace(/\.[^.]+$/, "").trim() || "Imported research";
+      const s = get();
+      const nextOrder =
+        s.researchDocuments.reduce((m, d) => Math.max(m, d.order), -1) + 1;
+      const doc: ResearchDocument = {
+        id: createId(),
+        title: base,
+        content,
+        order: nextOrder,
+        sourceFileName: file.name,
+      };
+      set({
+        researchDocuments: [...s.researchDocuments, doc].sort(
+          (a, b) => a.order - b.order,
+        ),
+        activeResearchId: doc.id,
+        editorContext: null,
+        pendingRevision: null,
+      });
+      schedulePersist();
+    },
+
+    renameResearchDocument: (id, title) => {
+      set((s) => ({
+        researchDocuments: s.researchDocuments.map((d) =>
+          d.id === id ? { ...d, title } : d,
+        ),
+      }));
+      schedulePersist();
+    },
+
+    removeResearchDocument: (id) => {
+      set((s) => {
+        const remaining = s.researchDocuments.filter((d) => d.id !== id);
+        let activeResearchId = s.activeResearchId;
+        if (activeResearchId === id) {
+          activeResearchId = null;
+        }
+        return {
+          researchDocuments: remaining.map((d, i) => ({ ...d, order: i })),
+          activeResearchId,
+        };
+      });
+      schedulePersist();
+    },
+
+    selectResearchDocument: (id) => {
+      set({
+        activeResearchId: id,
+        editorContext: null,
+        pendingRevision: null,
+      });
+      schedulePersist();
+    },
+
+    updateResearchContent: (id, content) => {
+      set((s) => ({
+        researchDocuments: s.researchDocuments.map((d) =>
+          d.id === id ? { ...d, content } : d,
+        ),
+      }));
+      schedulePersist();
+    },
+
     openTab: (id) =>
       set((s) => ({
         openTabs: s.openTabs.includes(id) ? s.openTabs : [...s.openTabs, id],
         activeChapterId: id,
+        activeResearchId: null,
         editorContext:
           s.editorContext?.chapterId === id ? s.editorContext : null,
         pendingRevision:
@@ -371,6 +496,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         openTabs:
           data.openTabs.length > 0 ? data.openTabs : [data.chapters[0]?.id].filter(Boolean) as string[],
         chatMessages: data.chatMessages,
+        researchDocuments: data.researchDocuments ?? [],
+        activeResearchId: null,
       });
       schedulePersist();
     },
@@ -381,7 +508,11 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       set({ activeFolderPath: null });
       const neo = buildDefaultProject();
       get().importWorkspace({
-        project: neo.project,
+        project: {
+          ...neo.project,
+          editorLayout: undefined,
+          singleFileName: undefined,
+        },
         chapters: neo.chapters,
         activeChapterId: neo.chapters[0]!.id,
         openTabs: [neo.chapters[0]!.id],
@@ -412,6 +543,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         id: createId(),
         title,
         description: trimmed,
+        editorLayout: undefined,
+        singleFileName: undefined,
       };
       const chapter: Chapter = {
         id: cid,
@@ -446,6 +579,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             ? data.openTabs
             : ([data.chapters[0]?.id].filter(Boolean) as string[]),
         chatMessages: data.chatMessages,
+        researchDocuments: data.researchDocuments ?? [],
       });
       set({
         workspaceScreen: "editor",
@@ -488,7 +622,11 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         set({ activeFolderPath: dirPath });
         const neo = buildDefaultProject();
         get().importWorkspace({
-          project: neo.project,
+          project: {
+            ...neo.project,
+            editorLayout: undefined,
+            singleFileName: undefined,
+          },
           chapters: neo.chapters,
           activeChapterId: neo.chapters[0]!.id,
           openTabs: [neo.chapters[0]!.id],
@@ -505,6 +643,47 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       }
     },
 
+    requestFileImport: () =>
+      set((s) => ({ fileImportPickRequest: s.fileImportPickRequest + 1 })),
+
+    openImportedFile: async (file: File) => {
+      const { importFileToEditorContent } = await import(
+        "@/lib/document-import/import-file-to-editor"
+      );
+      const content = await importFileToEditorContent(file);
+      const base =
+        file.name.replace(/\.[^.]+$/, "").trim() || "Untitled document";
+      const cid = createId();
+      const project: ProjectMeta = {
+        id: createId(),
+        title: base,
+        description: "",
+        editorLayout: "singleDocument",
+        singleFileName: file.name,
+      };
+      const chapter: Chapter = {
+        id: cid,
+        title: "Document",
+        content,
+        order: 0,
+      };
+      set({ activeFolderPath: null });
+      get().importWorkspace({
+        project,
+        chapters: [chapter],
+        activeChapterId: cid,
+        openTabs: [cid],
+        chatMessages: [],
+      });
+      set({
+        workspaceScreen: "editor",
+        editorContext: null,
+        pendingRevision: null,
+        focusMode: false,
+        leftSidebarOpen: false,
+      });
+    },
+
     goHome: () => {
       const s = get();
       const data = snapshotFromState(s);
@@ -518,6 +697,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           focusMode: false,
           editorContext: null,
           pendingRevision: null,
+          activeResearchId: null,
         });
       });
     },

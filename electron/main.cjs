@@ -28,8 +28,9 @@ const isDev =
   process.env.NODE_ENV === "development" ||
   !app.isPackaged;
 
+/** Same host as `wait-on` in `npm run electron` so the window loads the server we waited for. */
 const DEV_URL =
-  process.env.ELECTRON_DEV_URL || "http://localhost:3000";
+  process.env.ELECTRON_DEV_URL || "http://127.0.0.1:3000";
 
 let mainWindow = null;
 let nextChild = null;
@@ -142,14 +143,17 @@ async function createWindowAsync() {
        */
       webSecurity: !isDev,
     },
-    show: false,
+    // In dev, show immediately so the window is never invisible if load stalls or HMR is slow.
+    show: isDev,
   });
 
   bindWindowMaximizeEvents(mainWindow);
 
-  mainWindow.once("ready-to-show", () => {
-    mainWindow?.show();
-  });
+  if (!isDev) {
+    mainWindow.once("ready-to-show", () => {
+      mainWindow?.show();
+    });
+  }
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);

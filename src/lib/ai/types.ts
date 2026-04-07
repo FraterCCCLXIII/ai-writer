@@ -11,4 +11,9 @@ export type ChatContext = {
   selectedText: string | null;
   chapterTitle: string | null;
   chapterPlainText: string;
+  /**
+   * Client-ranked research excerpts (lexical match to current writing).
+   * Omitted in older clients or when no research / no anchor text.
+   */
+  relevantResearchSnippets?: { title: string; excerpt: string }[];
 };

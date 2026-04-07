@@ -12,6 +12,24 @@
   --destructive: #7f1d1d;
   --destructive-foreground: #fef2f2;
   --ring: #d4d4d8;
+  --scrollbar-thumb: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
+  --scrollbar-thumb-hover: color-mix(in oklab, var(--muted-foreground) 65%, transparent);
+  --scrollbar-track: transparent;
+}
+
+.light {
+  --background: #fafafa;
+  --foreground: #09090b;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --border: #e4e4e7;
+  --popover: #fafafa;
+  --popover-foreground: #09090b;
+  --destructive: #991b1b;
+  --destructive-foreground: #fef2f2;
+  --ring: #18181b;
+  --scrollbar-thumb: color-mix(in oklab, var(--muted-foreground) 40%, transparent);
+  --scrollbar-thumb-hover: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
 }
 
 @theme inline {
@@ -39,6 +57,34 @@ body {
   font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 }
 
+/* Global custom scrollbars (viewport + overflow containers) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: var(--scrollbar-thumb);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+*::-webkit-scrollbar-corner {
+  background: var(--scrollbar-track);
+}
+
 /* Electron frameless window: drag vs interactive regions */
 .app-region-drag {
   -webkit-app-region: drag;
@@ -46,6 +92,19 @@ body {
 
 .app-region-no-drag {
   -webkit-app-region: no-drag;
+}
+
+/*
+ * Sonner’s viewport uses z-index ~1e9 and can sit above the Electron custom
+ * title bar. Let clicks pass through the container; only the toast cards capture
+ * pointer events (see sonner [data-sonner-toast] rules).
+ */
+[data-sonner-toaster] {
+  pointer-events: none;
+}
+
+[data-sonner-toaster] [data-sonner-toast] {
+  pointer-events: auto;
 }
 
 ::selection {
@@ -104,26 +163,12 @@ body {
   }
 }
 
-/* Chat panel: thumb-only scrollbar (no visible track) */
+/* Chat panel: slightly narrower thumb; inherits token colors from global rules */
 .chat-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklab, var(--muted-foreground) 45%, transparent)
-    transparent;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
 .chat-scroll::-webkit-scrollbar {
   width: 6px;
-}
-
-.chat-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.chat-scroll::-webkit-scrollbar-thumb {
-  border-radius: 9999px;
-  background: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
-}
-
-.chat-scroll::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in oklab, var(--muted-foreground) 65%, transparent);
+  height: 6px;
 }

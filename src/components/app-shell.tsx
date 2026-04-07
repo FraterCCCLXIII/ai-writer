@@ -8,6 +8,8 @@ import { LeftSidebar } from "@/components/sidebar/left-sidebar";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { ManuscriptEditor } from "@/components/editor/manuscript-editor";
 import { CommandPalette } from "@/components/command-palette";
+import { DocumentExportMenu } from "@/components/document-export/document-export-menu";
+import { AppMenu } from "@/components/app-menu";
 import { ElectronTitleBar } from "@/components/electron-title-bar";
 import { HomeScreen } from "@/components/home-screen";
 import { useWorkspaceBootstrap } from "@/hooks/use-workspace-bootstrap";
@@ -22,6 +24,8 @@ export function AppShell() {
   const project = useProjectStore((s) => s.project);
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const chapters = useProjectStore((s) => s.chapters);
+  const activeResearchId = useProjectStore((s) => s.activeResearchId);
+  const researchDocuments = useProjectStore((s) => s.researchDocuments);
   const focusMode = useProjectStore((s) => s.focusMode);
   const setFocusMode = useProjectStore((s) => s.setFocusMode);
   const leftSidebarOpen = useProjectStore((s) => s.leftSidebarOpen);
@@ -30,7 +34,9 @@ export function AppShell() {
   const toggleRightSidebar = useProjectStore((s) => s.toggleRightSidebar);
   const setProjectField = useProjectStore((s) => s.setProjectField);
 
+  const isSingleDocument = project.editorLayout === "singleDocument";
   const activeChapter = chapters.find((c) => c.id === activeChapterId);
+  const activeResearch = researchDocuments.find((d) => d.id === activeResearchId);
   const focusModeRef = useRef(focusMode);
 
   useEffect(() => {
@@ -82,23 +88,19 @@ export function AppShell() {
   }
 
   const electronUi = isElectronApp();
-  const stickyBelowChrome = electronUi
-    ? "top-[calc(2.25rem+3rem)]"
-    : "top-12";
-  const mainColumnMinH = electronUi
-    ? "min-h-[calc(100dvh-2.25rem-3rem)]"
-    : "min-h-[calc(100dvh-3rem)]";
-  const sidebarHeight = electronUi
-    ? "h-[calc(100dvh-2.25rem-3rem)]"
-    : "h-[calc(100dvh-3rem)]";
 
   return (
-    <div className="flex min-h-screen flex-col bg-background text-foreground">
+    <div className="flex h-dvh max-h-dvh flex-col overflow-hidden bg-background text-foreground">
       {electronUi && !focusMode ? (
         <ElectronTitleBar title={project.title} />
       ) : null}
       {!focusMode && (
-        <header className="sticky top-0 z-40 flex h-12 shrink-0 items-center gap-3 border-b border-border bg-background px-3">
+        <header
+          className={cn(
+            "sticky z-40 flex h-12 shrink-0 items-center gap-3 border-b border-border bg-background px-3",
+            electronUi ? "top-9" : "top-0",
+          )}
+        >
           <button
             type="button"
             className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -127,38 +129,44 @@ export function AppShell() {
               className="w-full max-w-xl min-w-0 rounded-md border border-transparent bg-transparent px-2 py-1 text-sm font-medium text-foreground outline-none transition-colors placeholder:text-muted-foreground hover:border-border focus:border-border focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             />
           </div>
-          <span className="hidden text-xs text-muted-foreground sm:inline">
-            ⌘K
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            title="Enter focus mode (fullscreen)"
-            onClick={() => setFocusMode(true)}
-          >
-            <Maximize2 className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={cn(leftSidebarOpen && "bg-muted")}
-            title="Toggle manuscript"
-            onClick={() => toggleLeftSidebar()}
-          >
-            <List className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={cn(rightSidebarOpen && "bg-muted")}
-            title="Toggle assistant"
-            onClick={() => toggleRightSidebar()}
-          >
-            <MessageSquare className="h-4 w-4" />
-          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            {isSingleDocument ? <DocumentExportMenu /> : null}
+            {!electronUi ? <AppMenu /> : null}
+            <span className="hidden text-xs text-muted-foreground sm:inline">
+              ⌘K
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              title="Enter focus mode (fullscreen)"
+              onClick={() => setFocusMode(true)}
+            >
+              <Maximize2 className="h-4 w-4" />
+            </Button>
+            {!isSingleDocument ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={cn(leftSidebarOpen && "bg-muted")}
+                title="Toggle manuscript"
+                onClick={() => toggleLeftSidebar()}
+              >
+                <List className="h-4 w-4" />
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={cn(rightSidebarOpen && "bg-muted")}
+              title="Toggle assistant"
+              onClick={() => toggleRightSidebar()}
+            >
+              <MessageSquare className="h-4 w-4" />
+            </Button>
+          </div>
         </header>
       )}
 
@@ -200,33 +208,41 @@ export function AppShell() {
 
       <div className="flex min-h-0 flex-1">
         <AnimatePresence initial={false}>
-          {!focusMode && leftSidebarOpen && (
+          {!focusMode && leftSidebarOpen && !isSingleDocument && (
             <motion.aside
               key="left"
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: 280, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className={cn(
-                "sticky z-30 shrink-0 self-start overflow-hidden border-r border-border bg-background",
-                stickyBelowChrome,
-                sidebarHeight,
-              )}
+              className="z-30 flex min-h-0 shrink-0 flex-col overflow-hidden border-r border-border bg-background"
             >
-              <div className="flex h-full w-[280px] flex-col">
+              <div className="flex h-full min-h-0 w-[280px] flex-col">
                 <LeftSidebar />
               </div>
             </motion.aside>
           )}
         </AnimatePresence>
 
-        <main className="min-w-0 flex-1">
+        <main
+          id="manuscript-main-scroll"
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden"
+        >
           <div
             className={cn(
-              focusMode ? "min-h-dvh" : mainColumnMinH,
+              "flex min-h-0 flex-1 flex-col",
+              focusMode ? "min-h-dvh" : "min-h-full",
             )}
           >
-            {activeChapter ? (
+            {activeResearchId && activeResearch ? (
+              <ManuscriptEditor
+                key={`research-${activeResearch.id}`}
+                chapterId={activeResearch.id}
+                initialContent={activeResearch.content}
+                focusMode={focusMode}
+                surface="research"
+              />
+            ) : activeChapter ? (
               <ManuscriptEditor
                 key={activeChapter.id}
                 chapterId={activeChapter.id}
@@ -249,13 +265,9 @@ export function AppShell() {
               animate={{ width: 360, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className={cn(
-                "sticky z-30 shrink-0 self-start overflow-hidden bg-background",
-                stickyBelowChrome,
-                sidebarHeight,
-              )}
+              className="z-30 flex min-h-0 shrink-0 flex-col overflow-hidden bg-background"
             >
-              <div className="flex h-full w-[360px] flex-col">
+              <div className="flex h-full min-h-0 w-[360px] flex-col">
                 <ChatPanel />
               </div>
             </motion.aside>

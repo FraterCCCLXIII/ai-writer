@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   DndContext,
   closestCenter,
@@ -18,8 +18,15 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { BookOpen, GripVertical, Plus, Trash2 } from "lucide-react";
+import { BookOpen, FileText, GripVertical, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -120,8 +127,79 @@ function SortableChapter({
   );
 }
 
+function ResearchRow({
+  title,
+  active,
+  editing,
+  onSelect,
+  onStartRename,
+  onCommitRename,
+  onRemove,
+}: {
+  title: string;
+  active: boolean;
+  editing: boolean;
+  onSelect: () => void;
+  onStartRename: () => void;
+  onCommitRename: (t: string) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div
+      className={cn(
+        "group flex items-center gap-1 rounded-md border border-transparent px-1 py-0.5",
+        active && "border-border bg-muted/50",
+      )}
+    >
+      {editing ? (
+        <Input
+          autoFocus
+          defaultValue={title}
+          className="h-8 flex-1 text-sm"
+          onBlur={(e) => onCommitRename(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            if (e.key === "Escape") onCommitRename(title);
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={onSelect}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            onStartRename();
+          }}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted"
+        >
+          <FileText className="h-4 w-4 shrink-0 opacity-60" />
+          <span className="truncate">{title}</span>
+        </button>
+      )}
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+        title="Remove"
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove();
+        }}
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+}
+
 export function LeftSidebar() {
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [researchEditingId, setResearchEditingId] = useState<string | null>(
+    null,
+  );
+  const researchFileRef = useRef<HTMLInputElement>(null);
   const chapters = useProjectStore((s) => s.chapters);
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const selectChapter = useProjectStore((s) => s.selectChapter);
@@ -129,10 +207,30 @@ export function LeftSidebar() {
   const renameChapter = useProjectStore((s) => s.renameChapter);
   const removeChapter = useProjectStore((s) => s.removeChapter);
   const reorderChapters = useProjectStore((s) => s.reorderChapters);
+  const researchDocuments = useProjectStore((s) => s.researchDocuments);
+  const activeResearchId = useProjectStore((s) => s.activeResearchId);
+  const addResearchDocument = useProjectStore((s) => s.addResearchDocument);
+  const importResearchDocument = useProjectStore(
+    (s) => s.importResearchDocument,
+  );
+  const renameResearchDocument = useProjectStore(
+    (s) => s.renameResearchDocument,
+  );
+  const removeResearchDocument = useProjectStore(
+    (s) => s.removeResearchDocument,
+  );
+  const selectResearchDocument = useProjectStore(
+    (s) => s.selectResearchDocument,
+  );
 
   const ordered = useMemo(
     () => [...chapters].sort((a, b) => a.order - b.order),
     [chapters],
+  );
+
+  const orderedResearch = useMemo(
+    () => [...researchDocuments].sort((a, b) => a.order - b.order),
+    [researchDocuments],
   );
 
   const sensors = useSensors(
@@ -162,36 +260,114 @@ export function LeftSidebar() {
           <Plus className="h-4 w-4" />
         </Button>
       </div>
-      <ScrollArea className="flex-1 px-2 pb-4">
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={onDragEnd}
-        >
-          <SortableContext
-            items={ordered.map((c) => c.id)}
-            strategy={verticalListSortingStrategy}
+      <ScrollArea className="min-h-0 flex-1 px-2">
+        <div className="flex flex-col">
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={onDragEnd}
           >
-            <div className="flex flex-col gap-1">
-              {ordered.map((ch) => (
-                <SortableChapter
-                  key={ch.id}
-                  id={ch.id}
-                  title={ch.title}
-                  active={ch.id === activeChapterId}
-                  editing={editingId === ch.id}
-                  onSelect={() => selectChapter(ch.id)}
-                  onStartRename={() => setEditingId(ch.id)}
-                  onCommitRename={(t) => {
-                    renameChapter(ch.id, t.trim() || ch.title);
-                    setEditingId(null);
-                  }}
-                  onRemove={() => removeChapter(ch.id)}
-                />
-              ))}
+            <SortableContext
+              items={ordered.map((c) => c.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="flex flex-col gap-1">
+                {ordered.map((ch) => (
+                  <SortableChapter
+                    key={ch.id}
+                    id={ch.id}
+                    title={ch.title}
+                    active={
+                      ch.id === activeChapterId && activeResearchId === null
+                    }
+                    editing={editingId === ch.id}
+                    onSelect={() => selectChapter(ch.id)}
+                    onStartRename={() => setEditingId(ch.id)}
+                    onCommitRename={(t) => {
+                      renameChapter(ch.id, t.trim() || ch.title);
+                      setEditingId(null);
+                    }}
+                    onRemove={() => removeChapter(ch.id)}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+
+          <div className="mt-4 border-t border-border pt-4">
+            <div className="flex items-center justify-between px-1 pb-2">
+              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Research
+              </span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    aria-label="Add research"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem
+                    onClick={() => {
+                      addResearchDocument();
+                    }}
+                  >
+                    New document
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => researchFileRef.current?.click()}
+                  >
+                    Import file…
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
-          </SortableContext>
-        </DndContext>
+            <input
+              ref={researchFileRef}
+              type="file"
+              className="hidden"
+              accept=".txt,.text,.md,.markdown,.html,.htm,.json,.docx,.doc,.rtf,.rtfd"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (!file) return;
+                void importResearchDocument(file).catch((err) => {
+                  const msg =
+                    err instanceof Error ? err.message : "Could not import file.";
+                  toast.error(msg);
+                });
+              }}
+            />
+            <div className="flex flex-col gap-1 pb-4">
+              {orderedResearch.length === 0 ? (
+                <p className="px-2 text-[11px] leading-relaxed text-muted-foreground">
+                  Add notes or import files for reference.
+                </p>
+              ) : (
+                orderedResearch.map((doc) => (
+                  <ResearchRow
+                    key={doc.id}
+                    title={doc.title}
+                    active={doc.id === activeResearchId}
+                    editing={researchEditingId === doc.id}
+                    onSelect={() => selectResearchDocument(doc.id)}
+                    onStartRename={() => setResearchEditingId(doc.id)}
+                    onCommitRename={(t) => {
+                      renameResearchDocument(doc.id, t.trim() || doc.title);
+                      setResearchEditingId(null);
+                    }}
+                    onRemove={() => removeResearchDocument(doc.id)}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        </div>
       </ScrollArea>
     </div>
   );

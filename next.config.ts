@@ -8,6 +8,8 @@ const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 const nextConfig: NextConfig = {
   output: "standalone",
   outputFileTracingRoot: projectRoot,
+  /** Electron loads the dev server via http://127.0.0.1:3000 — allow HMR / dev assets. */
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
   turbopack: {
     root: projectRoot,
   },

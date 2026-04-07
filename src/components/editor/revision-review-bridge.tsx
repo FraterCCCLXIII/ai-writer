@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { useProjectStore } from "@/store/project-store";
 import { cn } from "@/lib/utils";
 import { plainTextToInsertContent } from "@/lib/plain-text-insert";
+import { getScrollableAncestor } from "@/lib/scroll-parent";
 
 /**
  * Applies chat assistant replacement text to the stored selection range, then
@@ -30,8 +31,8 @@ export function RevisionReviewBridge({ chapterId }: { chapterId: string }) {
       const pos = editor.state.selection.to;
       const coords = editor.view.coordsAtPos(pos);
       setAnchor({
-        top: coords.bottom + window.scrollY + 8,
-        left: coords.left + window.scrollX,
+        top: coords.bottom + 8,
+        left: coords.left,
       });
     } catch {
       setAnchor(null);
@@ -86,14 +87,16 @@ export function RevisionReviewBridge({ chapterId }: { chapterId: string }) {
 
   useEffect(() => {
     if (!pendingRevision || pendingRevision.chapterId !== chapterId) return;
+    if (!editor || editor.isDestroyed) return;
     const onScrollOrResize = () => positionFromEditor();
-    window.addEventListener("scroll", onScrollOrResize, true);
     window.addEventListener("resize", onScrollOrResize);
+    const scrollEl = getScrollableAncestor(editor.view.dom);
+    scrollEl?.addEventListener("scroll", onScrollOrResize, { passive: true });
     return () => {
-      window.removeEventListener("scroll", onScrollOrResize, true);
       window.removeEventListener("resize", onScrollOrResize);
+      scrollEl?.removeEventListener("scroll", onScrollOrResize);
     };
-  }, [pendingRevision, chapterId, positionFromEditor]);
+  }, [pendingRevision, chapterId, positionFromEditor, editor]);
 
   const onApprove = () => {
     setPendingRevision(null);

@@ -36,21 +36,43 @@ export default function GlobalError({
         {error.digest ? (
           <p style={{ color: "#a1a1aa", fontSize: 12 }}>Digest: {error.digest}</p>
         ) : null}
-        <button
-          type="button"
-          onClick={() => reset()}
-          style={{
-            marginTop: 20,
-            padding: "8px 16px",
-            borderRadius: 8,
-            border: "1px solid #3f3f46",
-            background: "#18181b",
-            color: "#fafafa",
-            cursor: "pointer",
-          }}
-        >
-          Try again
-        </button>
+        <div style={{ marginTop: 20, display: "flex", flexWrap: "wrap", gap: 12 }}>
+          <button
+            type="button"
+            onClick={() => reset()}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 8,
+              border: "1px solid #3f3f46",
+              background: "#18181b",
+              color: "#fafafa",
+              cursor: "pointer",
+            }}
+          >
+            Try again
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              window.location.reload();
+            }}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 8,
+              border: "1px solid #3b82f6",
+              background: "#1e3a5f",
+              color: "#eff6ff",
+              cursor: "pointer",
+            }}
+          >
+            Reload page
+          </button>
+        </div>
+        <p style={{ marginTop: 16, color: "#a1a1aa", fontSize: 12, maxWidth: 420 }}>
+          If this keeps happening after a force-reload, stop the dev server and run{" "}
+          <code style={{ color: "#e4e4e7" }}>npm run dev</code> again, or quit and reopen the
+          desktop app.
+        </p>
       </body>
     </html>
   );
