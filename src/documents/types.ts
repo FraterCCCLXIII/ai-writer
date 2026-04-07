@@ -29,3 +29,15 @@ export type ChatMessage = {
   content: string;
   createdAt: number;
 };
+
+/** Lightweight row for the home screen “recent projects” list. */
+export type ProjectIndexEntry = {
+  id: string;
+  title: string;
+  updatedAt: number;
+  /**
+   * When set, the full workspace is stored on disk at
+   * `{folderPath}/{WORKSPACE_FILE_NAME}` (Electron “open folder” projects).
+   */
+  folderPath?: string;
+};

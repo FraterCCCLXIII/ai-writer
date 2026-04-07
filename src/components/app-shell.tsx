@@ -1,29 +1,22 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import {
-  Home,
-  Maximize2,
-  Minimize2,
-  PanelLeftClose,
-  PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
-} from "lucide-react";
+import { Home, List, Maximize2, MessageSquare, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LeftSidebar } from "@/components/sidebar/left-sidebar";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { ManuscriptEditor } from "@/components/editor/manuscript-editor";
 import { CommandPalette } from "@/components/command-palette";
+import { HomeScreen } from "@/components/home-screen";
 import { useWorkspaceBootstrap } from "@/hooks/use-workspace-bootstrap";
 import { useProjectStore } from "@/store/project-store";
 import { cn } from "@/lib/utils";
 
 export function AppShell() {
   useWorkspaceBootstrap();
-  const hydrated = useProjectStore((s) => s.hydrated);
+  const workspaceScreen = useProjectStore((s) => s.workspaceScreen);
+  const goHome = useProjectStore((s) => s.goHome);
   const project = useProjectStore((s) => s.project);
   const activeChapterId = useProjectStore((s) => s.activeChapterId);
   const chapters = useProjectStore((s) => s.chapters);
@@ -82,25 +75,22 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", onKey);
   }, [focusMode, setFocusMode]);
 
-  if (!hydrated) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
-        Loading workspace…
-      </div>
-    );
+  if (workspaceScreen === "home") {
+    return <HomeScreen />;
   }
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
       {!focusMode && (
         <header className="sticky top-0 z-40 flex h-12 shrink-0 items-center gap-3 border-b border-border bg-background px-3">
-          <Link
-            href="/"
+          <button
+            type="button"
             className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
             aria-label="Home"
+            onClick={() => goHome()}
           >
             <Home className="h-4 w-4" />
-          </Link>
+          </button>
           <div className="min-w-0 flex-1">
             <label htmlFor="project-title" className="sr-only">
               Project name
@@ -141,11 +131,7 @@ export function AppShell() {
             title="Toggle manuscript"
             onClick={() => toggleLeftSidebar()}
           >
-            {leftSidebarOpen ? (
-              <PanelLeftClose className="h-4 w-4" />
-            ) : (
-              <PanelLeftOpen className="h-4 w-4" />
-            )}
+            <List className="h-4 w-4" />
           </Button>
           <Button
             type="button"
@@ -155,11 +141,7 @@ export function AppShell() {
             title="Toggle assistant"
             onClick={() => toggleRightSidebar()}
           >
-            {rightSidebarOpen ? (
-              <PanelRightClose className="h-4 w-4" />
-            ) : (
-              <PanelRightOpen className="h-4 w-4" />
-            )}
+            <MessageSquare className="h-4 w-4" />
           </Button>
         </header>
       )}

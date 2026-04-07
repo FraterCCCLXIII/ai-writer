@@ -5,11 +5,16 @@ import {
   BookPlus,
   Eye,
   EyeOff,
+  FolderOpen,
+  Home,
   MessageSquare,
   PanelLeft,
   PanelRight,
   Sparkles,
 } from "lucide-react";
+import { toast } from "sonner";
+import { isElectronApp } from "@/lib/electron-bridge";
+import { WORKSPACE_FILE_NAME } from "@/lib/workspace-file";
 import { Command } from "cmdk";
 import {
   Dialog,
@@ -26,6 +31,8 @@ export function CommandPalette() {
   const toggleRightSidebar = useProjectStore((s) => s.toggleRightSidebar);
   const setFocusMode = useProjectStore((s) => s.setFocusMode);
   const focusMode = useProjectStore((s) => s.focusMode);
+  const goHome = useProjectStore((s) => s.goHome);
+  const openFolderProject = useProjectStore((s) => s.openFolderProject);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -83,10 +90,52 @@ export function CommandPalette() {
                 </Command.Item>
               ))}
             </Command.Group>
+            {isElectronApp() ? (
+              <Command.Group
+                heading="Project"
+                className="mt-2 text-xs font-medium text-muted-foreground"
+              >
+                <Command.Item
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-muted"
+                  onSelect={() => {
+                    void (async () => {
+                      try {
+                        await openFolderProject();
+                        setOpen(false);
+                      } catch (e) {
+                        if (
+                          e instanceof Error &&
+                          e.message === "INVALID_WORKSPACE_FILE"
+                        ) {
+                          toast.error(
+                            `That folder does not contain a valid ${WORKSPACE_FILE_NAME} file.`,
+                          );
+                        } else {
+                          toast.error("Could not open that folder.");
+                        }
+                      }
+                    })();
+                  }}
+                >
+                  <FolderOpen className="h-4 w-4" />
+                  Open folder…
+                </Command.Item>
+              </Command.Group>
+            ) : null}
             <Command.Group
               heading="View"
               className="mt-2 text-xs font-medium text-muted-foreground"
             >
+              <Command.Item
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-muted"
+                onSelect={() => {
+                  goHome();
+                  setOpen(false);
+                }}
+              >
+                <Home className="h-4 w-4" />
+                Home screen
+              </Command.Item>
               <Command.Item
                 className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-muted"
                 onSelect={() => {

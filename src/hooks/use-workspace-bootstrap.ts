@@ -1,31 +1,30 @@
 "use client";
 
 import { useEffect } from "react";
-import { loadWorkspace } from "@/lib/persistence";
+import { loadProjectIndex } from "@/lib/persistence";
 import { useProjectStore } from "@/store/project-store";
 
+/**
+ * Loads the project index from IndexedDB for the home screen “recent” list.
+ */
 export function useWorkspaceBootstrap() {
-  const importWorkspace = useProjectStore((s) => s.importWorkspace);
-  const setHydrated = useProjectStore((s) => s.setHydrated);
+  const setRecentProjectsFromIndex = useProjectStore(
+    (s) => s.setRecentProjectsFromIndex,
+  );
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const data = await loadWorkspace();
-      if (cancelled) return;
-      if (data) {
-        importWorkspace({
-          project: data.project,
-          chapters: data.chapters,
-          activeChapterId: data.activeChapterId,
-          openTabs: data.openTabs,
-          chatMessages: data.chatMessages,
-        });
+      try {
+        const entries = await loadProjectIndex();
+        if (cancelled) return;
+        setRecentProjectsFromIndex(entries);
+      } catch {
+        if (!cancelled) setRecentProjectsFromIndex([]);
       }
-      setHydrated(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, [importWorkspace, setHydrated]);
+  }, [setRecentProjectsFromIndex]);
 }

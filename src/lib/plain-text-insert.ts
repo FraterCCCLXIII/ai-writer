@@ -7,6 +7,34 @@ import { splitPlainTextBlocks } from "@/lib/plain-text-blocks";
  * This builds JSON with explicit `marks: []` so inserted text uses normal
  * paragraph / theme styling.
  */
+/** Root TipTap `doc` JSON from plain text (paragraphs, no inherited marks). */
+export function paragraphDocFromPlainText(text: string): JSONContent {
+  const blocks = splitPlainTextBlocks(text);
+  if (blocks.length === 0) {
+    return { type: "doc", content: [{ type: "paragraph" }] };
+  }
+  if (blocks.length === 1) {
+    return {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: blocks[0]
+            ? [{ type: "text", text: blocks[0], marks: [] }]
+            : [],
+        },
+      ],
+    };
+  }
+  return {
+    type: "doc",
+    content: blocks.map((block) => ({
+      type: "paragraph",
+      content: block ? [{ type: "text", text: block, marks: [] }] : [],
+    })),
+  };
+}
+
 export function plainTextToInsertContent(
   text: string,
 ): JSONContent | JSONContent[] {

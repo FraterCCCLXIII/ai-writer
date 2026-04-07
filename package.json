@@ -2,11 +2,17 @@
   "name": "ai-writer",
   "version": "0.1.0",
   "private": true,
+  "main": "electron/main.cjs",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
+    "dev:electron": "cross-env ELECTRON_DEV=1 next dev --webpack",
+    "dev:turbo": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "electron:dev": "concurrently -k \"cross-env ELECTRON_DEV=1 next dev --webpack\" \"wait-on http://localhost:3000 && cross-env ELECTRON_DEV=1 electron electron/main.cjs\"",
+    "electron:pack": "next build && node scripts/prepare-standalone-electron.cjs && electron-builder --dir",
+    "electron:dist": "next build && node scripts/prepare-standalone-electron.cjs && electron-builder"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -44,6 +50,39 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.2",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.0",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.manuscript.aiwriter",
+    "productName": "Manuscript",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": ".next/standalone",
+        "to": "standalone",
+        "filter": ["**/*"]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": ["dmg", "zip"]
+    },
+    "win": {
+      "target": ["nsis"]
+    },
+    "linux": {
+      "target": ["AppImage"]
+    }
   }
 }

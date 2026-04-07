@@ -1,7 +1,18 @@
 import { create } from "zustand";
 import type { JSONContent } from "novel";
-import type { Chapter, ChatMessage, ProjectMeta } from "@/documents/types";
-import { saveWorkspace } from "@/lib/persistence";
+import type {
+  Chapter,
+  ChatMessage,
+  PersistedWorkspace,
+  ProjectIndexEntry,
+  ProjectMeta,
+} from "@/documents/types";
+import {
+  loadProjectIndex,
+  saveWorkspaceForProject,
+} from "@/lib/persistence";
+import { paragraphDocFromPlainText } from "@/lib/plain-text-insert";
+import { parsePersistedWorkspace } from "@/lib/workspace-schema";
 
 const emptyDoc: JSONContent = {
   type: "doc",
@@ -12,6 +23,24 @@ function createId() {
   return typeof crypto !== "undefined" && crypto.randomUUID
     ? crypto.randomUUID()
     : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function snapshotFromState(state: {
+  project: ProjectMeta;
+  chapters: Chapter[];
+  activeChapterId: string | null;
+  openTabs: string[];
+  chatMessages: ChatMessage[];
+}): PersistedWorkspace {
+  return {
+    version: 1,
+    project: state.project,
+    chapters: state.chapters,
+    activeChapterId: state.activeChapterId,
+    openTabs: state.openTabs,
+    chatMessages: state.chatMessages,
+    updatedAt: Date.now(),
+  };
 }
 
 function buildDefaultProject(): { project: ProjectMeta; chapters: Chapter[] } {
@@ -33,8 +62,17 @@ function buildDefaultProject(): { project: ProjectMeta; chapters: Chapter[] } {
   };
 }
 
+export type WorkspaceScreen = "home" | "editor";
+
 type ProjectState = {
-  hydrated: boolean;
+  /** Recent projects (IndexedDB index), for the home screen. */
+  recentProjects: ProjectIndexEntry[];
+  /**
+   * When non-null (Electron), the workspace is saved under this folder as
+   * `manuscript.workspace.json` instead of only in IndexedDB.
+   */
+  activeFolderPath: string | null;
+  workspaceScreen: WorkspaceScreen;
   project: ProjectMeta;
   chapters: Chapter[];
   activeChapterId: string | null;
@@ -59,7 +97,6 @@ type ProjectState = {
     assistantMessageId: string;
   } | null;
 
-  setHydrated: (v: boolean) => void;
   setProjectField: (patch: Partial<ProjectMeta>) => void;
   selectChapter: (id: string) => void;
   addChapter: () => void;
@@ -101,30 +138,41 @@ type ProjectState = {
     openTabs: string[];
     chatMessages: ChatMessage[];
   }) => void;
+  setRecentProjectsFromIndex: (entries: ProjectIndexEntry[]) => void;
+  startNewProject: () => void;
+  startNewProjectFromPrompt: (prompt: string) => void;
+  openPersistedWorkspace: (
+    data: PersistedWorkspace,
+    folderPath?: string | null,
+  ) => void;
+  openProjectFromJson: (data: unknown) => void;
+  /** Electron: pick a folder; load existing workspace file or create a new project there. */
+  openFolderProject: () => Promise<void>;
+  goHome: () => void;
 };
 
-let persistTimer: ReturnType<typeof setTimeout> | null = null;
-
-function schedulePersist(get: () => ProjectState) {
-  if (persistTimer) clearTimeout(persistTimer);
-  persistTimer = setTimeout(() => {
-    const s = get();
-    void saveWorkspace({
-      version: 1,
-      project: s.project,
-      chapters: s.chapters,
-      activeChapterId: s.activeChapterId,
-      openTabs: s.openTabs,
-      chatMessages: s.chatMessages,
-      updatedAt: Date.now(),
-    });
-  }, 400);
-}
-
 export const useProjectStore = create<ProjectState>((set, get) => {
+  let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const schedulePersist = () => {
+    if (persistTimer) clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => {
+      const s = get();
+      const data = snapshotFromState(s);
+      void saveWorkspaceForProject(s.project.id, data, {
+        folderPath: s.activeFolderPath ?? undefined,
+      }).then(async () => {
+        const entries = await loadProjectIndex();
+        set({ recentProjects: entries });
+      });
+    }, 400);
+  };
+
   const defaults = buildDefaultProject();
   return {
-    hydrated: false,
+    recentProjects: [],
+    activeFolderPath: null,
+    workspaceScreen: "home",
     project: defaults.project,
     chapters: defaults.chapters,
     activeChapterId: defaults.chapters[0]?.id ?? null,
@@ -136,11 +184,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     editorContext: null,
     pendingRevision: null,
 
-    setHydrated: (v) => set({ hydrated: v }),
-
     setProjectField: (patch) => {
       set((s) => ({ project: { ...s.project, ...patch } }));
-      schedulePersist(get);
+      schedulePersist();
     },
 
     selectChapter: (id) => {
@@ -152,7 +198,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         pendingRevision:
           s.pendingRevision?.chapterId === id ? s.pendingRevision : null,
       }));
-      schedulePersist(get);
+      schedulePersist();
     },
 
     addChapter: () => {
@@ -171,14 +217,14 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         editorContext: null,
         pendingRevision: null,
       }));
-      schedulePersist(get);
+      schedulePersist();
     },
 
     renameChapter: (id, title) => {
       set((s) => ({
         chapters: s.chapters.map((c) => (c.id === id ? { ...c, title } : c)),
       }));
-      schedulePersist(get);
+      schedulePersist();
     },
 
     removeChapter: (id) => {
@@ -203,7 +249,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           openTabs: s.openTabs.filter((t) => t !== id),
         };
       });
-      schedulePersist(get);
+      schedulePersist();
     },
 
     reorderChapters: (orderedIds) => {
@@ -218,7 +264,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         const rest = s.chapters.filter((c) => !orderedIds.includes(c.id));
         return { chapters: [...next, ...rest].sort((a, b) => a.order - b.order) };
       });
-      schedulePersist(get);
+      schedulePersist();
     },
 
     updateChapterContent: (id, content) => {
@@ -227,7 +273,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           c.id === id ? { ...c, content } : c,
         ),
       }));
-      schedulePersist(get);
+      schedulePersist();
     },
 
     openTab: (id) =>
@@ -262,7 +308,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
               : null,
         };
       });
-      schedulePersist(get);
+      schedulePersist();
     },
 
     appendChatMessage: (msg) => {
@@ -272,7 +318,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         createdAt: Date.now(),
       };
       set((s) => ({ chatMessages: [...s.chatMessages, full] }));
-      schedulePersist(get);
+      schedulePersist();
       return full;
     },
 
@@ -286,25 +332,23 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 
     setChatMessages: (messages) => {
       set({ chatMessages: messages });
-      schedulePersist(get);
+      schedulePersist();
     },
 
     flushWorkspace: () => {
       const s = get();
-      void saveWorkspace({
-        version: 1,
-        project: s.project,
-        chapters: s.chapters,
-        activeChapterId: s.activeChapterId,
-        openTabs: s.openTabs,
-        chatMessages: s.chatMessages,
-        updatedAt: Date.now(),
+      const data = snapshotFromState(s);
+      void saveWorkspaceForProject(s.project.id, data, {
+        folderPath: s.activeFolderPath ?? undefined,
+      }).then(async () => {
+        const entries = await loadProjectIndex();
+        set({ recentProjects: entries });
       });
     },
 
     clearChat: () => {
       set({ chatMessages: [], pendingRevision: null });
-      schedulePersist(get);
+      schedulePersist();
     },
 
     setFocusMode: (v) => set({ focusMode: v }),
@@ -328,7 +372,154 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           data.openTabs.length > 0 ? data.openTabs : [data.chapters[0]?.id].filter(Boolean) as string[],
         chatMessages: data.chatMessages,
       });
-      schedulePersist(get);
+      schedulePersist();
+    },
+
+    setRecentProjectsFromIndex: (entries) => set({ recentProjects: entries }),
+
+    startNewProject: () => {
+      set({ activeFolderPath: null });
+      const neo = buildDefaultProject();
+      get().importWorkspace({
+        project: neo.project,
+        chapters: neo.chapters,
+        activeChapterId: neo.chapters[0]!.id,
+        openTabs: [neo.chapters[0]!.id],
+        chatMessages: [],
+      });
+      set({
+        workspaceScreen: "editor",
+        editorContext: null,
+        pendingRevision: null,
+        focusMode: false,
+      });
+    },
+
+    startNewProjectFromPrompt: (prompt: string) => {
+      const trimmed = prompt.trim();
+      if (!trimmed) return;
+      const firstLine =
+        trimmed
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .find((l) => l.length > 0) ?? trimmed;
+      const title =
+        firstLine.length > 72
+          ? `${firstLine.slice(0, 69)}…`
+          : firstLine || "Untitled manuscript";
+      const cid = createId();
+      const project: ProjectMeta = {
+        id: createId(),
+        title,
+        description: trimmed,
+      };
+      const chapter: Chapter = {
+        id: cid,
+        title: "Chapter 1",
+        content: paragraphDocFromPlainText(trimmed),
+        order: 0,
+      };
+      set({ activeFolderPath: null });
+      get().importWorkspace({
+        project,
+        chapters: [chapter],
+        activeChapterId: cid,
+        openTabs: [cid],
+        chatMessages: [],
+      });
+      set({
+        workspaceScreen: "editor",
+        editorContext: null,
+        pendingRevision: null,
+        focusMode: false,
+      });
+    },
+
+    openPersistedWorkspace: (data, folderPath = null) => {
+      set({ activeFolderPath: folderPath });
+      get().importWorkspace({
+        project: data.project,
+        chapters: data.chapters,
+        activeChapterId: data.activeChapterId,
+        openTabs:
+          data.openTabs.length > 0
+            ? data.openTabs
+            : ([data.chapters[0]?.id].filter(Boolean) as string[]),
+        chatMessages: data.chatMessages,
+      });
+      set({
+        workspaceScreen: "editor",
+        editorContext: null,
+        pendingRevision: null,
+        focusMode: false,
+      });
+    },
+
+    openProjectFromJson: (data: unknown) => {
+      const parsed = parsePersistedWorkspace(data);
+      if (!parsed) {
+        throw new Error("INVALID_WORKSPACE_FILE");
+      }
+      get().openPersistedWorkspace(parsed, null);
+    },
+
+    openFolderProject: async () => {
+      const api =
+        typeof window !== "undefined" ? window.electronAPI : undefined;
+      if (!api) return;
+      const dirPath = await api.openFolder();
+      if (!dirPath) return;
+      const res = await api.readWorkspaceFile(dirPath);
+      if (res.ok) {
+        let raw: unknown;
+        try {
+          raw = JSON.parse(res.data) as unknown;
+        } catch {
+          throw new Error("INVALID_WORKSPACE_FILE");
+        }
+        const parsed = parsePersistedWorkspace(raw);
+        if (!parsed) {
+          throw new Error("INVALID_WORKSPACE_FILE");
+        }
+        get().openPersistedWorkspace(parsed, dirPath);
+        return;
+      }
+      if (res.missing) {
+        set({ activeFolderPath: dirPath });
+        const neo = buildDefaultProject();
+        get().importWorkspace({
+          project: neo.project,
+          chapters: neo.chapters,
+          activeChapterId: neo.chapters[0]!.id,
+          openTabs: [neo.chapters[0]!.id],
+          chatMessages: [],
+        });
+        set({
+          workspaceScreen: "editor",
+          editorContext: null,
+          pendingRevision: null,
+          focusMode: false,
+        });
+        get().flushWorkspace();
+        return;
+      }
+    },
+
+    goHome: () => {
+      const s = get();
+      const data = snapshotFromState(s);
+      void saveWorkspaceForProject(s.project.id, data, {
+        folderPath: s.activeFolderPath ?? undefined,
+      }).then(async () => {
+        const entries = await loadProjectIndex();
+        set({
+          recentProjects: entries,
+          workspaceScreen: "home",
+          focusMode: false,
+          editorContext: null,
+          pendingRevision: null,
+        });
+      });
     },
   };
 });
