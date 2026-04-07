@@ -113,6 +113,13 @@ type ProjectState = {
   updateChapterContent: (id: string, content: JSONContent) => void;
   addResearchDocument: () => void;
   importResearchDocument: (file: File) => Promise<void>;
+  /** Import several research files in one batch (shared file picker). */
+  importResearchDocuments: (
+    files: File[] | FileList,
+  ) => Promise<{
+    imported: number;
+    failed: { name: string; message: string }[];
+  }>;
   renameResearchDocument: (id: string, title: string) => void;
   removeResearchDocument: (id: string) => void;
   selectResearchDocument: (id: string) => void;
@@ -330,32 +337,63 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       schedulePersist();
     },
 
-    importResearchDocument: async (file: File) => {
+    importResearchDocuments: async (files: File[] | FileList) => {
+      const list = Array.from(files).filter((f) => f != null);
+      if (list.length === 0) {
+        return { imported: 0, failed: [] };
+      }
+
       const { importFileToEditorContent } = await import(
         "@/lib/document-import/import-file-to-editor"
       );
-      const content = await importFileToEditorContent(file);
-      const base =
-        file.name.replace(/\.[^.]+$/, "").trim() || "Imported research";
-      const s = get();
-      const nextOrder =
-        s.researchDocuments.reduce((m, d) => Math.max(m, d.order), -1) + 1;
-      const doc: ResearchDocument = {
-        id: createId(),
-        title: base,
-        content,
-        order: nextOrder,
-        sourceFileName: file.name,
-      };
-      set({
-        researchDocuments: [...s.researchDocuments, doc].sort(
-          (a, b) => a.order - b.order,
-        ),
-        activeResearchId: doc.id,
-        editorContext: null,
-        pendingRevision: null,
-      });
-      schedulePersist();
+
+      const s0 = get();
+      let nextOrder =
+        s0.researchDocuments.reduce((m, d) => Math.max(m, d.order), -1) + 1;
+      const newDocs: ResearchDocument[] = [];
+      const failed: { name: string; message: string }[] = [];
+
+      for (const file of list) {
+        try {
+          const content = await importFileToEditorContent(file);
+          const base =
+            file.name.replace(/\.[^.]+$/, "").trim() || "Imported research";
+          newDocs.push({
+            id: createId(),
+            title: base,
+            content,
+            order: nextOrder,
+            sourceFileName: file.name,
+          });
+          nextOrder += 1;
+        } catch (e) {
+          failed.push({
+            name: file.name,
+            message: e instanceof Error ? e.message : "Could not import file.",
+          });
+        }
+      }
+
+      if (newDocs.length > 0) {
+        set({
+          researchDocuments: [...s0.researchDocuments, ...newDocs].sort(
+            (a, b) => a.order - b.order,
+          ),
+          activeResearchId: newDocs[newDocs.length - 1]!.id,
+          editorContext: null,
+          pendingRevision: null,
+        });
+        schedulePersist();
+      }
+
+      return { imported: newDocs.length, failed };
+    },
+
+    importResearchDocument: async (file: File) => {
+      const { imported, failed } = await get().importResearchDocuments([file]);
+      if (imported === 0 && failed.length > 0) {
+        throw new Error(failed[0]!.message);
+      }
     },
 
     renameResearchDocument: (id, title) => {

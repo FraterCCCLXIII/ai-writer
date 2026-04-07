@@ -210,8 +210,8 @@ export function LeftSidebar() {
   const researchDocuments = useProjectStore((s) => s.researchDocuments);
   const activeResearchId = useProjectStore((s) => s.activeResearchId);
   const addResearchDocument = useProjectStore((s) => s.addResearchDocument);
-  const importResearchDocument = useProjectStore(
-    (s) => s.importResearchDocument,
+  const importResearchDocuments = useProjectStore(
+    (s) => s.importResearchDocuments,
   );
   const renameResearchDocument = useProjectStore(
     (s) => s.renameResearchDocument,
@@ -322,7 +322,7 @@ export function LeftSidebar() {
                   <DropdownMenuItem
                     onClick={() => researchFileRef.current?.click()}
                   >
-                    Import file…
+                    Import files…
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -331,16 +331,28 @@ export function LeftSidebar() {
               ref={researchFileRef}
               type="file"
               className="hidden"
+              multiple
               accept=".txt,.text,.md,.markdown,.html,.htm,.json,.docx,.doc,.rtf,.rtfd"
               onChange={(e) => {
-                const file = e.target.files?.[0];
+                const files = Array.from(e.target.files ?? []);
                 e.target.value = "";
-                if (!file) return;
-                void importResearchDocument(file).catch((err) => {
-                  const msg =
-                    err instanceof Error ? err.message : "Could not import file.";
-                  toast.error(msg);
-                });
+                if (files.length === 0) return;
+                void (async () => {
+                  const { imported, failed } =
+                    await importResearchDocuments(files);
+                  if (failed.length > 0) {
+                    const summary =
+                      failed.length === 1
+                        ? failed[0]!.message
+                        : `${failed.length} of ${files.length} files failed: ${failed.map((f) => f.name).join(", ")}`;
+                    toast.error(summary);
+                  }
+                  if (imported > 0 && failed.length === 0 && files.length > 1) {
+                    toast.success(
+                      `Imported ${imported} research file${imported === 1 ? "" : "s"}.`,
+                    );
+                  }
+                })();
               }}
             />
             <div className="flex flex-col gap-1 pb-4">
