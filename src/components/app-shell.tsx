@@ -8,8 +8,10 @@ import { LeftSidebar } from "@/components/sidebar/left-sidebar";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { ManuscriptEditor } from "@/components/editor/manuscript-editor";
 import { CommandPalette } from "@/components/command-palette";
+import { ElectronTitleBar } from "@/components/electron-title-bar";
 import { HomeScreen } from "@/components/home-screen";
 import { useWorkspaceBootstrap } from "@/hooks/use-workspace-bootstrap";
+import { isElectronApp } from "@/lib/electron-bridge";
 import { useProjectStore } from "@/store/project-store";
 import { cn } from "@/lib/utils";
 
@@ -79,8 +81,22 @@ export function AppShell() {
     return <HomeScreen />;
   }
 
+  const electronUi = isElectronApp();
+  const stickyBelowChrome = electronUi
+    ? "top-[calc(2.25rem+3rem)]"
+    : "top-12";
+  const mainColumnMinH = electronUi
+    ? "min-h-[calc(100dvh-2.25rem-3rem)]"
+    : "min-h-[calc(100dvh-3rem)]";
+  const sidebarHeight = electronUi
+    ? "h-[calc(100dvh-2.25rem-3rem)]"
+    : "h-[calc(100dvh-3rem)]";
+
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
+      {electronUi && !focusMode ? (
+        <ElectronTitleBar title={project.title} />
+      ) : null}
       {!focusMode && (
         <header className="sticky top-0 z-40 flex h-12 shrink-0 items-center gap-3 border-b border-border bg-background px-3">
           <button
@@ -191,7 +207,11 @@ export function AppShell() {
               animate={{ width: 280, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="sticky top-12 z-30 h-[calc(100dvh-3rem)] shrink-0 self-start overflow-hidden border-r border-border bg-background"
+              className={cn(
+                "sticky z-30 shrink-0 self-start overflow-hidden border-r border-border bg-background",
+                stickyBelowChrome,
+                sidebarHeight,
+              )}
             >
               <div className="flex h-full w-[280px] flex-col">
                 <LeftSidebar />
@@ -203,7 +223,7 @@ export function AppShell() {
         <main className="min-w-0 flex-1">
           <div
             className={cn(
-              focusMode ? "min-h-dvh" : "min-h-[calc(100dvh-3rem)]",
+              focusMode ? "min-h-dvh" : mainColumnMinH,
             )}
           >
             {activeChapter ? (
@@ -229,7 +249,11 @@ export function AppShell() {
               animate={{ width: 360, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="sticky top-12 z-30 h-[calc(100dvh-3rem)] shrink-0 self-start overflow-hidden bg-background"
+              className={cn(
+                "sticky z-30 shrink-0 self-start overflow-hidden bg-background",
+                stickyBelowChrome,
+                sidebarHeight,
+              )}
             >
               <div className="flex h-full w-[360px] flex-col">
                 <ChatPanel />

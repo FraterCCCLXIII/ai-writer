@@ -1,5 +1,18 @@
 "use strict";
 
+/**
+ * Next.js dev (localhost + HMR) uses relaxed `webSecurity` while `isDev` is true; Electron
+ * otherwise prints noisy renderer security warnings. Suppress them when not in production.
+ * Set `ELECTRON_DISABLE_SECURITY_WARNINGS=0` to see warnings anyway.
+ * Must run before `require("electron")`.
+ */
+if (
+  process.env.ELECTRON_DISABLE_SECURITY_WARNINGS !== "0" &&
+  process.env.NODE_ENV !== "production"
+) {
+  process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = "true";
+}
+
 const { app, BrowserWindow, shell, ipcMain, dialog, session } = require("electron");
 const fs = require("fs");
 const fsp = fs.promises;
@@ -99,6 +112,14 @@ function startStandaloneServer(port) {
   });
 }
 
+function bindWindowMaximizeEvents(win) {
+  const send = (maximized) => {
+    win.webContents.send("window:maximized-changed", maximized);
+  };
+  win.on("maximize", () => send(true));
+  win.on("unmaximize", () => send(false));
+}
+
 async function createWindowAsync() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -106,6 +127,8 @@ async function createWindowAsync() {
     minWidth: 800,
     minHeight: 600,
     title: "Manuscript",
+    frame: false,
+    ...(process.platform === "darwin" ? { roundedCorners: true } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -121,6 +144,8 @@ async function createWindowAsync() {
     },
     show: false,
   });
+
+  bindWindowMaximizeEvents(mainWindow);
 
   mainWindow.once("ready-to-show", () => {
     mainWindow?.show();
@@ -155,6 +180,28 @@ async function createWindowAsync() {
 function workspaceFilePath(folderPath) {
   return path.join(folderPath, WORKSPACE_FILENAME);
 }
+
+ipcMain.handle("window:minimize", () => {
+  const w = BrowserWindow.getFocusedWindow() ?? mainWindow;
+  w?.minimize();
+});
+
+ipcMain.handle("window:toggle-maximize", () => {
+  const w = BrowserWindow.getFocusedWindow() ?? mainWindow;
+  if (!w) return;
+  if (w.isMaximized()) w.unmaximize();
+  else w.maximize();
+});
+
+ipcMain.handle("window:close", () => {
+  const w = BrowserWindow.getFocusedWindow() ?? mainWindow;
+  w?.close();
+});
+
+ipcMain.handle("window:is-maximized", () => {
+  const w = BrowserWindow.getFocusedWindow() ?? mainWindow;
+  return w?.isMaximized() ?? false;
+});
 
 ipcMain.handle("workspace:open-folder", async () => {
   const win = BrowserWindow.getFocusedWindow() ?? mainWindow;
