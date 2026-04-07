@@ -1,0 +1,198 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { BookOpen, GripVertical, Plus, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
+import { useProjectStore } from "@/store/project-store";
+
+function SortableChapter({
+  id,
+  title,
+  active,
+  editing,
+  onSelect,
+  onStartRename,
+  onCommitRename,
+  onRemove,
+}: {
+  id: string;
+  title: string;
+  active: boolean;
+  editing: boolean;
+  onSelect: () => void;
+  onStartRename: () => void;
+  onCommitRename: (t: string) => void;
+  onRemove: () => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "group flex items-center gap-1 rounded-md border border-transparent px-1 py-0.5",
+        active && "border-border bg-muted/50",
+        isDragging && "opacity-60",
+      )}
+    >
+      <button
+        type="button"
+        className="cursor-grab touch-none text-muted-foreground hover:text-foreground"
+        aria-label="Reorder"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="h-4 w-4" />
+      </button>
+      {editing ? (
+        <Input
+          autoFocus
+          defaultValue={title}
+          className="h-8 flex-1 text-sm"
+          onBlur={(e) => onCommitRename(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            if (e.key === "Escape") onCommitRename(title);
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={onSelect}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            onStartRename();
+          }}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted"
+        >
+          <BookOpen className="h-4 w-4 shrink-0 opacity-60" />
+          <span className="truncate">{title}</span>
+        </button>
+      )}
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+        title="Delete chapter"
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove();
+        }}
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+}
+
+export function LeftSidebar() {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const chapters = useProjectStore((s) => s.chapters);
+  const activeChapterId = useProjectStore((s) => s.activeChapterId);
+  const selectChapter = useProjectStore((s) => s.selectChapter);
+  const addChapter = useProjectStore((s) => s.addChapter);
+  const renameChapter = useProjectStore((s) => s.renameChapter);
+  const removeChapter = useProjectStore((s) => s.removeChapter);
+  const reorderChapters = useProjectStore((s) => s.reorderChapters);
+
+  const ordered = useMemo(
+    () => [...chapters].sort((a, b) => a.order - b.order),
+    [chapters],
+  );
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
+  const onDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = ordered.findIndex((c) => c.id === active.id);
+    const newIndex = ordered.findIndex((c) => c.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const next = arrayMove(ordered, oldIndex, newIndex).map((c) => c.id);
+    reorderChapters(next);
+  };
+
+  return (
+    <div className="flex h-full flex-col bg-background">
+      <div className="flex items-center justify-between px-4 py-3">
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Chapters
+        </span>
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={addChapter}>
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
+      <ScrollArea className="flex-1 px-2 pb-4">
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={onDragEnd}
+        >
+          <SortableContext
+            items={ordered.map((c) => c.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            <div className="flex flex-col gap-1">
+              {ordered.map((ch) => (
+                <SortableChapter
+                  key={ch.id}
+                  id={ch.id}
+                  title={ch.title}
+                  active={ch.id === activeChapterId}
+                  editing={editingId === ch.id}
+                  onSelect={() => selectChapter(ch.id)}
+                  onStartRename={() => setEditingId(ch.id)}
+                  onCommitRename={(t) => {
+                    renameChapter(ch.id, t.trim() || ch.title);
+                    setEditingId(null);
+                  }}
+                  onRemove={() => removeChapter(ch.id)}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+      </ScrollArea>
+    </div>
+  );
+}
