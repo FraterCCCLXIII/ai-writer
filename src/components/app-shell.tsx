@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Home, List, Maximize2, MessageSquare, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { LeftSidebar } from "@/components/sidebar/left-sidebar";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { ManuscriptEditor } from "@/components/editor/manuscript-editor";
 import { CommandPalette } from "@/components/command-palette";
+import { GenerateChaptersDialog } from "@/components/generate-chapters-dialog";
 import { DocumentExportMenu } from "@/components/document-export/document-export-menu";
 import { AppMenu } from "@/components/app-menu";
 import { ElectronTitleBar } from "@/components/electron-title-bar";
@@ -82,6 +83,28 @@ export function AppShell() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [focusMode, setFocusMode]);
+
+  const [generateChaptersOpen, setGenerateChaptersOpen] = useState(false);
+  const [generateChaptersRange, setGenerateChaptersRange] = useState<
+    { start: number; end: number } | undefined
+  >();
+
+  useEffect(() => {
+    if (workspaceScreen !== "editor") return;
+    const h = (e: Event) => {
+      const ce = e as CustomEvent<{ start?: number; end?: number }>;
+      const d = ce.detail;
+      if (d?.start != null && d?.end != null) {
+        setGenerateChaptersRange({ start: d.start, end: d.end });
+      } else {
+        setGenerateChaptersRange(undefined);
+      }
+      setGenerateChaptersOpen(true);
+    };
+    window.addEventListener("ai-writer:generate-chapters", h);
+    return () =>
+      window.removeEventListener("ai-writer:generate-chapters", h);
+  }, [workspaceScreen]);
 
   if (workspaceScreen === "home") {
     return <HomeScreen />;
@@ -276,6 +299,14 @@ export function AppShell() {
       </div>
 
       <CommandPalette />
+      <GenerateChaptersDialog
+        open={generateChaptersOpen}
+        onOpenChange={(o) => {
+          setGenerateChaptersOpen(o);
+          if (!o) setGenerateChaptersRange(undefined);
+        }}
+        initialRange={generateChaptersRange}
+      />
     </div>
   );
 }

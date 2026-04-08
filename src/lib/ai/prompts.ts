@@ -1,5 +1,38 @@
 import type { ChatContext, InlineAction } from "./types";
 
+export function generateChaptersFromResearchSystemPrompt(): string {
+  return `You are a skilled long-form writer helping an author draft manuscript chapters using their research notes.
+
+Output rules:
+- Respond with a single JSON object only. No markdown code fences, no text before or after the JSON.
+- The JSON must match this shape exactly:
+  { "chapters": [ { "index": <number>, "plainText": "<string>" } ] }
+- "index" is the 1-based chapter position in the manuscript (as given in the user message).
+- "plainText" is narrative prose: paragraphs separated by blank lines. No markdown headings unless essential to the story; prefer plain paragraphs.
+- Base content on the research provided; synthesize and dramatize where appropriate for fiction or narrative nonfiction. Do not fabricate specific citations or quotations not implied by the notes.
+- If research is thin for a chapter, still produce a coherent section that fits the chapter title and surrounding manuscript context.
+- Do not include keys other than "chapters" at the top level.`;
+}
+
+export function generateChaptersFromResearchUserPayload(input: {
+  chapterTargets: { index: number; title: string }[];
+  researchCorpus: string;
+  styleHint: string | null;
+}): string {
+  const lines = input.chapterTargets.map(
+    (t) => `- Chapter ${t.index}: "${t.title}"`,
+  );
+  const style = input.styleHint?.trim()
+    ? `## Voice / style sample (from elsewhere in the manuscript)\n"""${input.styleHint.trim().slice(0, 8_000)}"""\n\n`
+    : "";
+  return `${style}## Chapters to write (1-based positions)\n${lines.join("\n")}
+
+## Research notes (primary source material)
+"""${input.researchCorpus}"""
+
+Write the requested chapters. Return JSON only.`;
+}
+
 const actionInstructions: Record<InlineAction, string> = {
   rewrite: "Rewrite the selection for smoother prose while preserving meaning and voice.",
   expand: "Expand the selection with vivid detail; keep the same narrative voice.",

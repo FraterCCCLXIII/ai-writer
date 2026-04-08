@@ -27,7 +27,11 @@ import { uploadFn } from "./image-upload";
 import { EditorToolbar } from "./editor-toolbar";
 import { ContextHighlightBridge } from "./context-highlight-bridge";
 import { RevisionReviewBridge } from "./revision-review-bridge";
-import { FormatAndAiBubble, getSelectionSlice } from "./format-bubble";
+import {
+  FormatAndAiBubble,
+  getSelectionSlice,
+  getSelectionSliceFromState,
+} from "./format-bubble";
 import { InsertFromChatBridge } from "./insert-from-chat-bridge";
 import { InlineAiPanel, type InlineAiRequest } from "./inline-ai-panel";
 import { useProjectStore } from "@/store/project-store";
@@ -143,6 +147,16 @@ export function ManuscriptEditor({
           editorProps={{
             handleDOMEvents: {
               keydown: (_view, event) => handleCommandNavigation(event),
+              mouseup: (view) => {
+                if (isResearch) return false;
+                const slice = getSelectionSliceFromState(view.state);
+                if (slice) {
+                  setEditorContext({ ...slice, chapterId });
+                } else if (view.hasFocus()) {
+                  setEditorContext(null);
+                }
+                return false;
+              },
             },
             transformPastedHTML: (html) =>
               normalizePastedHtmlForParagraphs(html),

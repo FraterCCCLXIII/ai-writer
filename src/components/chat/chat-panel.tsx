@@ -17,14 +17,22 @@ import { useProjectStore } from "@/store/project-store";
 import { jsonToPlainText } from "@/lib/tiptap-plain-text";
 import { dispatchInsertToEditor } from "@/lib/editor-insert-events";
 import { getAiOverridesForRequest } from "@/lib/ai-settings";
+import { parseBuildChaptersMessage } from "@/lib/generate-chapters-from-research";
 import {
   getLiveNotesAnchorParams,
   relevantResearchSnippetsForChat,
 } from "@/lib/research/live-notes";
 import { LiveNotesPanel } from "@/components/chat/live-notes-panel";
 
+function selectionPreview(text: string, max = 72) {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1)}…`;
+}
+
 export function ChatPanel() {
   const chatMessages = useProjectStore((s) => s.chatMessages);
+  const chapters = useProjectStore((s) => s.chapters);
   const appendChatMessage = useProjectStore((s) => s.appendChatMessage);
   const patchChatMessage = useProjectStore((s) => s.patchChatMessage);
   const flushWorkspace = useProjectStore((s) => s.flushWorkspace);
@@ -59,6 +67,18 @@ export function ChatPanel() {
   const send = async () => {
     const text = input.trim();
     if (!text || streaming) return;
+
+    const buildRange = parseBuildChaptersMessage(text);
+    if (buildRange) {
+      setInput("");
+      window.dispatchEvent(
+        new CustomEvent("ai-writer:generate-chapters", {
+          detail: { start: buildRange.start, end: buildRange.end },
+        }),
+      );
+      return;
+    }
+
     const snap = useProjectStore.getState();
     const ctxAtSend = snap.editorContext;
     const chapterForContext = snap.chapters.find(
@@ -163,6 +183,10 @@ export function ChatPanel() {
       toast.error("Could not copy");
     }
   };
+
+  const contextChapterTitle = editorContext
+    ? chapters.find((c) => c.id === editorContext.chapterId)?.title ?? null
+    : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col border-l border-border bg-background">
@@ -326,58 +350,78 @@ export function ChatPanel() {
             </div>
 
             <div className="sticky bottom-0 z-20 shrink-0 border-t border-border bg-background p-3">
-              {editorContext ? (
-                <div className="mb-3 rounded-lg border border-border bg-muted/25 px-3 py-2.5">
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      Selected text
-                    </span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
-                      title="Remove context"
-                      onClick={() => setEditorContext(null)}
+              <div className="overflow-hidden rounded-lg border border-border bg-background shadow-sm">
+                {editorContext ? (
+                  <div className="flex flex-wrap items-center gap-1.5 border-b border-border bg-muted/20 px-2 py-2">
+                    <div
+                      className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border border-border bg-muted/60 py-0.5 pl-2.5 pr-0.5 text-xs text-foreground shadow-sm"
+                      title={editorContext.text}
                     >
-                      <X className="h-4 w-4" />
-                    </Button>
+                      <span className="shrink-0 font-medium text-muted-foreground">
+                        Selection
+                      </span>
+                      {contextChapterTitle ? (
+                        <>
+                          <span
+                            className="shrink-0 text-muted-foreground"
+                            aria-hidden
+                          >
+                            ·
+                          </span>
+                          <span className="max-w-[8rem] shrink-0 truncate text-muted-foreground">
+                            {contextChapterTitle}
+                          </span>
+                        </>
+                      ) : null}
+                      <span className="mx-0.5 max-w-[min(100%,14rem)] truncate text-foreground/90">
+                        {selectionPreview(editorContext.text)}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+                        title="Remove reference"
+                        onClick={() => setEditorContext(null)}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
-                  <p className="chat-scroll mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                    {editorContext.text}
-                  </p>
+                ) : null}
+                <div className="flex gap-2 p-2">
+                  <Input
+                    data-chat-input
+                    className="min-w-0 flex-1 border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                    placeholder="Type a message"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        void send();
+                      }
+                    }}
+                    disabled={streaming}
+                  />
+                  <Button
+                    type="button"
+                    size="icon"
+                    className="shrink-0"
+                    disabled={streaming || !input.trim()}
+                    onClick={() => void send()}
+                  >
+                    {streaming ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
+                  </Button>
                 </div>
-              ) : null}
-              <div className="flex gap-2">
-                <Input
-                  data-chat-input
-                  placeholder="Type a message"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      void send();
-                    }
-                  }}
-                  disabled={streaming}
-                />
-                <Button
-                  type="button"
-                  size="icon"
-                  disabled={streaming || !input.trim()}
-                  onClick={() => void send()}
-                >
-                  {streaming ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                </Button>
               </div>
               {!editorContext ? (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Tip: select text in the editor to attach it as context.
+                  Tip: select text in the editor to add a reference bubble here.
                 </p>
               ) : null}
             </div>

@@ -82,7 +82,7 @@ function SortableChapter({
         {...attributes}
         {...listeners}
       >
-        <GripVertical className="h-4 w-4" />
+        <GripVertical className="h-3.5 w-3.5" />
       </button>
       {editing ? (
         <Input
@@ -106,7 +106,7 @@ function SortableChapter({
           }}
           className="flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted"
         >
-          <BookOpen className="h-4 w-4 shrink-0 opacity-60" />
+          <BookOpen className="h-3.5 w-3.5 shrink-0 opacity-60" />
           <span className="truncate">{title}</span>
         </button>
       )}
@@ -114,14 +114,14 @@ function SortableChapter({
         type="button"
         variant="ghost"
         size="icon"
-        className="h-8 w-8 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+        className="h-7 w-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
         title="Delete chapter"
         onClick={(e) => {
           e.stopPropagation();
           onRemove();
         }}
       >
-        <Trash2 className="h-4 w-4" />
+        <Trash2 className="h-3.5 w-3.5" />
       </Button>
     </div>
   );
@@ -173,7 +173,7 @@ function ResearchRow({
           }}
           className="flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted"
         >
-          <FileText className="h-4 w-4 shrink-0 opacity-60" />
+          <FileText className="h-3.5 w-3.5 shrink-0 opacity-60" />
           <span className="truncate">{title}</span>
         </button>
       )}
@@ -181,14 +181,14 @@ function ResearchRow({
         type="button"
         variant="ghost"
         size="icon"
-        className="h-8 w-8 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+        className="h-7 w-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
         title="Remove"
         onClick={(e) => {
           e.stopPropagation();
           onRemove();
         }}
       >
-        <Trash2 className="h-4 w-4" />
+        <Trash2 className="h-3.5 w-3.5" />
       </Button>
     </div>
   );
@@ -256,8 +256,8 @@ export function LeftSidebar() {
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Chapters
         </span>
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={addChapter}>
-          <Plus className="h-4 w-4" />
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={addChapter}>
+          <Plus className="h-3.5 w-3.5" />
         </Button>
       </div>
       <ScrollArea className="min-h-0 flex-1 px-2">
@@ -305,10 +305,10 @@ export function LeftSidebar() {
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8"
+                    className="h-7 w-7"
                     aria-label="Add research"
                   >
-                    <Plus className="h-4 w-4" />
+                    <Plus className="h-3.5 w-3.5" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-48">

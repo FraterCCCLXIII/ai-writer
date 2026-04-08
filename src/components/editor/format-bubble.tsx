@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import type { InlineAction } from "@/lib/ai/types";
 import type { Editor } from "@tiptap/core";
+import type { EditorState } from "@tiptap/pm/state";
 
 function BubbleButton({
   active,
@@ -141,14 +142,22 @@ export function FormatAndAiBubble({
   );
 }
 
+export function getSelectionSliceFromState(state: EditorState): {
+  from: number;
+  to: number;
+  text: string;
+} | null {
+  const { from, to, empty } = state.selection;
+  if (empty) return null;
+  const text = state.doc.textBetween(from, to, "\n");
+  if (!text.trim()) return null;
+  return { from, to, text };
+}
+
 export function getSelectionSlice(editor: Editor): {
   from: number;
   to: number;
   text: string;
 } | null {
-  const { from, to, empty } = editor.state.selection;
-  if (empty) return null;
-  const text = editor.state.doc.textBetween(from, to, "\n");
-  if (!text.trim()) return null;
-  return { from, to, text };
+  return getSelectionSliceFromState(editor.state);
 }

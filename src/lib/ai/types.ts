@@ -7,6 +7,11 @@ export type InlineAction =
   | "tone_casual"
   | "tone_dramatic";
 
+/** Response shape for research-driven chapter generation (JSON mode). */
+export type GenerateChaptersFromResearchResult = {
+  chapters: { index: number; plainText: string }[];
+};
+
 export type ChatContext = {
   selectedText: string | null;
   chapterTitle: string | null;

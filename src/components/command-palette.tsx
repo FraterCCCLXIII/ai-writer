@@ -8,6 +8,7 @@ import {
   FileText,
   FolderOpen,
   Home,
+  Library,
   MessageSquare,
   PanelLeft,
   PanelRight,
@@ -25,6 +26,7 @@ import { useProjectStore } from "@/store/project-store";
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
+  const project = useProjectStore((s) => s.project);
   const addChapter = useProjectStore((s) => s.addChapter);
   const chapters = useProjectStore((s) => s.chapters);
   const selectChapter = useProjectStore((s) => s.selectChapter);
@@ -78,6 +80,20 @@ export function CommandPalette() {
                 <BookPlus className="h-4 w-4" />
                 New chapter
               </Command.Item>
+              {project.editorLayout !== "singleDocument" ? (
+                <Command.Item
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-muted"
+                  onSelect={() => {
+                    window.dispatchEvent(
+                      new CustomEvent("ai-writer:generate-chapters"),
+                    );
+                    setOpen(false);
+                  }}
+                >
+                  <Library className="h-4 w-4" />
+                  Generate chapters from research…
+                </Command.Item>
+              ) : null}
               {chapters.map((c) => (
                 <Command.Item
                   key={c.id}

@@ -76,3 +76,50 @@ export async function streamChatCompletion(params: {
     }
   }
 }
+
+/**
+ * Non-streaming chat completion; optional JSON mode for OpenAI-compatible APIs.
+ * Returns the assistant message content string (JSON text if using json_object).
+ */
+export async function completeChatJson(params: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  messages: { role: "system" | "user" | "assistant"; content: string }[];
+  signal?: AbortSignal;
+  /** When true, requests structured JSON (supported by OpenAI and many proxies). */
+  jsonMode?: boolean;
+}): Promise<string> {
+  const url = `${params.baseUrl.replace(/\/$/, "")}/chat/completions`;
+  const body: Record<string, unknown> = {
+    model: params.model,
+    stream: false,
+    messages: params.messages,
+  };
+  if (params.jsonMode) {
+    body.response_format = { type: "json_object" };
+  }
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${params.apiKey}`,
+    },
+    body: JSON.stringify(body),
+    signal: params.signal,
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(err || `HTTP ${res.status}`);
+  }
+
+  const json = (await res.json()) as {
+    choices?: { message?: { content?: string | null } }[];
+  };
+  const content = json.choices?.[0]?.message?.content;
+  if (content == null || content === "") {
+    throw new Error("Empty response from model");
+  }
+  return content;
+}

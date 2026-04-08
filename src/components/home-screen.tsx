@@ -198,7 +198,7 @@ export function HomeScreen() {
                 : "text-muted-foreground hover:bg-muted/80 hover:text-foreground",
             )}
           >
-            <HomeIcon className="h-4 w-4 shrink-0 opacity-70" />
+            <HomeIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
             Home
           </button>
           <button
@@ -211,7 +211,7 @@ export function HomeScreen() {
                 : "text-muted-foreground hover:bg-muted/80 hover:text-foreground",
             )}
           >
-            <Library className="h-4 w-4 shrink-0 opacity-70" />
+            <Library className="h-3.5 w-3.5 shrink-0 opacity-70" />
             All projects
           </button>
           <button
@@ -219,7 +219,7 @@ export function HomeScreen() {
             onClick={() => startNewProject()}
             className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
-            <PenLine className="h-4 w-4 shrink-0" />
+            <PenLine className="h-3.5 w-3.5 shrink-0" />
             Blank project
           </button>
           <button
@@ -227,7 +227,7 @@ export function HomeScreen() {
             onClick={onPickWorkspaceFile}
             className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
-            <FileUp className="h-4 w-4 shrink-0" />
+            <FileUp className="h-3.5 w-3.5 shrink-0" />
             Open workspace…
           </button>
           <button
@@ -235,7 +235,7 @@ export function HomeScreen() {
             onClick={onPickOpenFile}
             className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
-            <FileText className="h-4 w-4 shrink-0" />
+            <FileText className="h-3.5 w-3.5 shrink-0" />
             Open file…
           </button>
           {isElectronApp() ? (
@@ -244,7 +244,7 @@ export function HomeScreen() {
               onClick={onOpenFolder}
               className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
-              <FolderOpen className="h-4 w-4 shrink-0" />
+              <FolderOpen className="h-3.5 w-3.5 shrink-0" />
               Open folder…
             </button>
           ) : null}
