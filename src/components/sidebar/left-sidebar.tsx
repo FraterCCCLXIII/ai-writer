@@ -1,11 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
-import {
-  FilePlus,
-  FolderPlus,
-  Plus,
-} from "lucide-react";
+import { useCallback, useRef, useState } from "react";
+import { FilePlus, FolderPlus, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,9 +10,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useProjectStore } from "@/store/project-store";
-import { FileTreeNode } from "@/components/sidebar/file-tree-node";
+import {
+  FileTreeNode,
+  type DragState,
+  type DropPosition,
+} from "@/components/sidebar/file-tree-node";
 
 type NewNodeMode = null | "file" | "folder";
 
@@ -28,12 +27,15 @@ export function LeftSidebar() {
   const createFolder = useProjectStore((s) => s.createFolder);
   const renameNode = useProjectStore((s) => s.renameNode);
   const deleteNode = useProjectStore((s) => s.deleteNode);
+  const moveNode = useProjectStore((s) => s.moveNode);
   const toggleFolder = useProjectStore((s) => s.toggleFolder);
   const projectTitle = useProjectStore((s) => s.config.project.title);
 
   const [newNodeMode, setNewNodeMode] = useState<NewNodeMode>(null);
   const [newNodeName, setNewNodeName] = useState("");
   const newNodeInputRef = useRef<HTMLInputElement>(null);
+
+  const [dragState, setDragState] = useState<DragState | null>(null);
 
   const startNewNode = (mode: "file" | "folder") => {
     setNewNodeMode(mode);
@@ -49,9 +51,7 @@ export function LeftSidebar() {
     }
 
     const finalName =
-      newNodeMode === "file" && !name.includes(".")
-        ? `${name}.md`
-        : name;
+      newNodeMode === "file" && !name.includes(".") ? `${name}.md` : name;
 
     if (newNodeMode === "file") {
       void createFile(null, finalName);
@@ -63,9 +63,40 @@ export function LeftSidebar() {
     setNewNodeName("");
   };
 
+  const handleDragStart = useCallback((sourcePath: string) => {
+    setDragState({ sourcePath, targetPath: null, position: null });
+  }, []);
+
+  const handleDragOver = useCallback(
+    (targetPath: string, position: DropPosition) => {
+      setDragState((prev) => {
+        if (!prev) return null;
+        if (prev.targetPath === targetPath && prev.position === position)
+          return prev;
+        return { ...prev, targetPath, position };
+      });
+    },
+    [],
+  );
+
+  const handleDrop = useCallback(() => {
+    if (
+      dragState?.sourcePath &&
+      dragState.targetPath &&
+      dragState.position
+    ) {
+      moveNode(dragState.sourcePath, dragState.targetPath, dragState.position);
+    }
+    setDragState(null);
+  }, [dragState, moveNode]);
+
+  const handleDragEnd = useCallback(() => {
+    setDragState(null);
+  }, []);
+
   return (
-    <div className="flex h-full flex-col bg-background">
-      <div className="flex items-center justify-between px-4 py-3">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-background">
+      <div className="flex min-w-0 items-center justify-between px-4 py-3">
         <span className="truncate text-xs font-medium uppercase tracking-wide text-muted-foreground">
           {projectTitle || "Workspace"}
         </span>
@@ -94,7 +125,7 @@ export function LeftSidebar() {
         </DropdownMenu>
       </div>
 
-      <ScrollArea className="min-h-0 flex-1 px-2">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2">
         <div className="flex flex-col gap-0.5 pb-4">
           {tree.map((node) => (
             <FileTreeNode
@@ -102,10 +133,17 @@ export function LeftSidebar() {
               node={node}
               depth={0}
               activeFilePath={activeFilePath}
+              dragState={dragState}
               onSelect={(path) => void selectFile(path)}
               onToggleFolder={toggleFolder}
-              onRename={(oldPath, newName) => void renameNode(oldPath, newName)}
+              onRename={(oldPath, newName) =>
+                void renameNode(oldPath, newName)
+              }
               onDelete={(path) => void deleteNode(path)}
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              onDragEnd={handleDragEnd}
             />
           ))}
 
@@ -121,9 +159,7 @@ export function LeftSidebar() {
                 value={newNodeName}
                 onChange={(e) => setNewNodeName(e.target.value)}
                 placeholder={
-                  newNodeMode === "file"
-                    ? "filename.md"
-                    : "folder name"
+                  newNodeMode === "file" ? "filename" : "folder name"
                 }
                 className="h-7 flex-1 text-sm"
                 onBlur={commitNewNode}
@@ -140,11 +176,12 @@ export function LeftSidebar() {
 
           {tree.length === 0 && !newNodeMode && (
             <p className="px-2 py-4 text-center text-[11px] leading-relaxed text-muted-foreground">
-              This workspace is empty. Create a file or folder to get started.
+              This workspace is empty. Create a file or folder to get
+              started.
             </p>
           )}
         </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 }

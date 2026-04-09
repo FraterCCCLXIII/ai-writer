@@ -253,3 +253,140 @@ export function toggleFolderExpanded(
     return n;
   });
 }
+
+/**
+ * Move a node to a new position in the tree.
+ *
+ * @param tree       Current tree
+ * @param sourcePath Path of the node being moved
+ * @param targetPath Path of the drop target (file or folder)
+ * @param position   "before" | "after" | "inside" (into a folder)
+ *
+ * Returns updated tree with paths adjusted if the parent changed,
+ * or null if the move is invalid (e.g. moving a folder into itself).
+ */
+export function moveNodeInTree(
+  tree: WorkspaceNode[],
+  sourcePath: string,
+  targetPath: string,
+  position: "before" | "after" | "inside",
+): WorkspaceNode[] | null {
+  if (sourcePath === targetPath) return null;
+  if (targetPath.startsWith(sourcePath + "/")) return null;
+
+  const sourceNode = findNodeByPath(tree, sourcePath);
+  if (!sourceNode) return null;
+
+  if (position === "inside") {
+    const targetNode = findNodeByPath(tree, targetPath);
+    if (!targetNode || targetNode.kind !== "folder") return null;
+  }
+
+  let stripped = removeNode(tree, sourcePath);
+
+  const newParentPath =
+    position === "inside"
+      ? targetPath
+      : targetPath.includes("/")
+        ? targetPath.substring(0, targetPath.lastIndexOf("/"))
+        : null;
+
+  const oldParentPath = sourcePath.includes("/")
+    ? sourcePath.substring(0, sourcePath.lastIndexOf("/"))
+    : null;
+
+  const parentChanged =
+    newParentPath !== oldParentPath ||
+    (position === "inside" && newParentPath !== oldParentPath);
+
+  let movedNode = sourceNode;
+  if (parentChanged) {
+    const newBasePath = newParentPath
+      ? `${newParentPath}/${sourceNode.name}`
+      : sourceNode.name;
+    movedNode = rebasePath(sourceNode, sourcePath, newBasePath);
+  }
+
+  if (position === "inside") {
+    stripped = insertIntoFolder(stripped, movedNode, targetPath);
+  } else {
+    stripped = insertAtPosition(
+      stripped,
+      movedNode,
+      targetPath,
+      position,
+    );
+  }
+
+  return stripped;
+}
+
+function rebasePath(
+  node: WorkspaceNode,
+  oldBase: string,
+  newBase: string,
+): WorkspaceNode {
+  const newPath = node.path === oldBase
+    ? newBase
+    : newBase + node.path.slice(oldBase.length);
+
+  if (node.kind === "file") {
+    return { ...node, path: newPath };
+  }
+  return {
+    ...node,
+    path: newPath,
+    children: node.children.map((c) => rebasePath(c, oldBase, newBase)),
+  };
+}
+
+function insertIntoFolder(
+  tree: WorkspaceNode[],
+  node: WorkspaceNode,
+  folderPath: string,
+): WorkspaceNode[] {
+  return tree.map((n) => {
+    if (n.kind === "folder" && n.path === folderPath) {
+      return { ...n, children: [...n.children, node], expanded: true };
+    }
+    if (n.kind === "folder") {
+      return {
+        ...n,
+        children: insertIntoFolder(n.children, node, folderPath),
+      };
+    }
+    return n;
+  });
+}
+
+function insertAtPosition(
+  tree: WorkspaceNode[],
+  node: WorkspaceNode,
+  targetPath: string,
+  position: "before" | "after",
+): WorkspaceNode[] {
+  const idx = tree.findIndex((n) => n.path === targetPath);
+  if (idx !== -1) {
+    const result = [...tree];
+    const insertIdx = position === "before" ? idx : idx + 1;
+    result.splice(insertIdx, 0, node);
+    return result;
+  }
+  return tree.map((n) => {
+    if (n.kind === "folder") {
+      return {
+        ...n,
+        children: insertAtPosition(n.children, node, targetPath, position),
+      };
+    }
+    return n;
+  });
+}
+
+/** Display name for a file node — hides .md extension. */
+export function displayName(name: string): string {
+  if (name.toLowerCase().endsWith(".md")) {
+    return name.slice(0, -3);
+  }
+  return name;
+}

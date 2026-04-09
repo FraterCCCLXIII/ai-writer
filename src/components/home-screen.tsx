@@ -126,17 +126,15 @@ export function HomeScreen() {
             </button>
             <button
               type="button"
-              onClick={isElectronApp() ? onOpenFolder : () => setHomeTab("all")}
+              onClick={onOpenFolder}
               className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <FolderOpen className="h-3.5 w-3.5 shrink-0" />
-              {isElectronApp() ? "Open folder…" : "Open project…"}
+              Open folder…
             </button>
           </nav>
           <p className="mt-auto px-2 pt-8 text-[11px] leading-relaxed text-muted-foreground">
-            {isElectronApp()
-              ? "Each project is a folder. Your files live as .md documents on disk. App config is stored in a hidden .aiwriter/ directory."
-              : "Each project is a workspace with individual files. Data is stored in this browser."}
+            Each project is a folder. Your files live as .md documents on disk. App config is stored in a hidden .aiwriter/ directory.
           </p>
         </aside>
 
@@ -155,9 +153,7 @@ export function HomeScreen() {
                     Start a new project
                   </h1>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    {isElectronApp()
-                      ? "Choose or create a folder for your project. Each file in your workspace is a separate .md document — like a code editor, but for writing."
-                      : "Create a new workspace. Each file is an individual document you can organize into folders."}
+                    Choose or create a folder for your project. Each file in your workspace is a separate .md document — like a code editor, but for writing.
                   </p>
                   <div className="mt-6 flex flex-wrap items-center gap-3">
                     <Button
@@ -166,23 +162,21 @@ export function HomeScreen() {
                       onClick={() => startNewProject()}
                     >
                       <PenLine className="h-4 w-4" />
-                      {isElectronApp() ? "New project…" : "New project"}
+                      New project
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
                       className="gap-2"
-                      onClick={isElectronApp() ? onOpenFolder : () => setHomeTab("all")}
+                      onClick={onOpenFolder}
                     >
                       <FolderOpen className="h-4 w-4" />
-                      {isElectronApp() ? "Open folder…" : "Open project…"}
+                      Open folder…
                     </Button>
                   </div>
-                  {isElectronApp() && (
-                    <p className="mt-3 text-xs text-muted-foreground">
-                      Pick an empty folder to start fresh, or open one with an existing project.
-                    </p>
-                  )}
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    Pick an empty folder to start fresh, or open one with an existing project.
+                  </p>
                 </div>
               </div>
 

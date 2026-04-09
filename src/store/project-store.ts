@@ -13,6 +13,7 @@ import {
   collectFiles,
   createId,
   insertNode,
+  moveNodeInTree,
   removeNode,
   renameNodeInTree,
   toggleFolderExpanded,
@@ -27,6 +28,8 @@ import {
   renameWorkspacePath,
   loadWorkspaceIndex,
   openFolderWorkspace,
+  pickAndOpenBrowserFolder,
+  supportsNativeFolderPicker,
   type WorkspaceIndexEntry,
 } from "@/lib/workspace-fs";
 import { jsonContentToMarkdown, markdownToJsonContent, isEditableFile } from "@/lib/markdown-serialize";
@@ -101,6 +104,11 @@ type ProjectState = {
   createFolder: (parentPath: string | null, name: string) => Promise<void>;
   renameNode: (oldPath: string, newName: string) => Promise<void>;
   deleteNode: (path: string) => Promise<void>;
+  moveNode: (
+    sourcePath: string,
+    targetPath: string,
+    position: "before" | "after" | "inside",
+  ) => void;
   toggleFolder: (path: string) => void;
 
   /** Update the content of the currently active file from editor changes. */
@@ -188,13 +196,20 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     });
   };
 
-  const defaultConfig = buildDefaultConfig();
+  const placeholderConfig: WorkspaceConfig = {
+    version: 2,
+    project: { id: "", title: "", description: "" },
+    activeFilePath: null,
+    tree: [],
+    chatMessages: [],
+    updatedAt: 0,
+  };
 
   return {
     recentProjects: [],
     workspacePath: null,
     workspaceScreen: "home",
-    config: defaultConfig,
+    config: placeholderConfig,
     openFiles: new Map(),
     focusMode: false,
     leftSidebarOpen: true,
@@ -264,19 +279,35 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     openFolderProject: async () => {
       const api =
         typeof window !== "undefined" ? window.electronAPI : undefined;
-      if (!api) return;
 
-      const dirPath = await api.openFolder();
-      if (!dirPath) return;
-
-      try {
-        const { config } = await openFolderWorkspace(dirPath);
-        get().openWorkspace(dirPath, config);
-      } catch (e) {
-        toast.error(
-          e instanceof Error ? e.message : "Could not open that folder.",
-        );
+      if (api) {
+        const dirPath = await api.openFolder();
+        if (!dirPath) return;
+        try {
+          const { config } = await openFolderWorkspace(dirPath);
+          get().openWorkspace(dirPath, config);
+        } catch (e) {
+          toast.error(
+            e instanceof Error ? e.message : "Could not open that folder.",
+          );
+        }
+        return;
       }
+
+      if (supportsNativeFolderPicker()) {
+        try {
+          const result = await pickAndOpenBrowserFolder();
+          if (!result) return;
+          get().openWorkspace(result.workspaceId, result.config);
+        } catch (e) {
+          toast.error(
+            e instanceof Error ? e.message : "Could not open that folder.",
+          );
+        }
+        return;
+      }
+
+      toast("Your browser doesn't support folder picking. Use Chrome or Edge for full filesystem access.");
     },
 
     goHome: () => {
@@ -423,7 +454,11 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         };
       });
 
-      await renameWorkspacePath(s.workspacePath, oldPath, newPath);
+      try {
+        await renameWorkspacePath(s.workspacePath, oldPath, newPath);
+      } catch (err) {
+        console.error("Failed to rename on disk:", err);
+      }
       schedulePersist();
     },
 
@@ -458,6 +493,22 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         await get().selectFile(activeFilePath);
       }
 
+      schedulePersist();
+    },
+
+    moveNode: (sourcePath, targetPath, position) => {
+      const s = get();
+      const result = moveNodeInTree(
+        s.config.tree,
+        sourcePath,
+        targetPath,
+        position,
+      );
+      if (!result) return;
+
+      set((prev) => ({
+        config: { ...prev.config, tree: result },
+      }));
       schedulePersist();
     },
 
