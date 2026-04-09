@@ -6,12 +6,12 @@ import { FILE_PICKER_ACCEPT_ALL } from "@/lib/document-import/document-import-co
 import { useProjectStore } from "@/store/project-store";
 
 /**
- * Global hidden file input for “Open file” (single-document import). Mount once under Providers.
+ * Global hidden file input for importing files into the workspace.
  */
 export function FileImportHost() {
   const inputRef = useRef<HTMLInputElement>(null);
   const pickRequest = useProjectStore((s) => s.fileImportPickRequest);
-  const openImportedFile = useProjectStore((s) => s.openImportedFile);
+  const createFile = useProjectStore((s) => s.createFile);
 
   useEffect(() => {
     if (pickRequest === 0) return;
@@ -22,13 +22,15 @@ export function FileImportHost() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+
+    const name = file.name || "Imported.md";
     void (async () => {
       try {
-        await openImportedFile(file);
-        toast.success("Document opened");
+        await createFile(null, name);
+        toast.success(`Created ${name}`);
       } catch (err) {
         toast.error(
-          err instanceof Error ? err.message : "Could not open that file.",
+          err instanceof Error ? err.message : "Could not import that file.",
         );
       }
     })();

@@ -1,11 +1,5 @@
 "use strict";
 
-/**
- * Next.js dev (localhost + HMR) uses relaxed `webSecurity` while `isDev` is true; Electron
- * otherwise prints noisy renderer security warnings. Suppress them when not in production.
- * Set `ELECTRON_DISABLE_SECURITY_WARNINGS=0` to see warnings anyway.
- * Must run before `require("electron")`.
- */
 if (
   process.env.ELECTRON_DISABLE_SECURITY_WARNINGS !== "0" &&
   process.env.NODE_ENV !== "production"
@@ -22,21 +16,23 @@ const http = require("http");
 
 const packageName = require(path.join(__dirname, "..", "package.json")).name;
 
-/** Dev: Next runs via `next dev` (see npm script). Prod: bundled standalone server. */
 const isDev =
   process.env.ELECTRON_DEV === "1" ||
   process.env.NODE_ENV === "development" ||
   !app.isPackaged;
 
-/** Same host as `wait-on` in `npm run electron` so the window loads the server we waited for. */
 const DEV_URL =
   process.env.ELECTRON_DEV_URL || "http://127.0.0.1:3000";
 
 let mainWindow = null;
 let nextChild = null;
 
-/** Workspace file at the root of an opened project folder (VS Code–style local project). */
-const WORKSPACE_FILENAME = "manuscript.workspace.json";
+/** Hidden directory inside workspace folders for app config. */
+const WORKSPACE_CONFIG_DIR = ".aiwriter";
+const WORKSPACE_CONFIG_FILE = "workspace.json";
+
+/** @deprecated Legacy workspace file — kept for migration detection. */
+const LEGACY_WORKSPACE_FILENAME = "manuscript.workspace.json";
 
 function getStandaloneDir() {
   const base = app.isPackaged
@@ -135,15 +131,8 @@ async function createWindowAsync() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      /**
-       * Must match `isDev` for any load of `next dev`: unpackaged Electron has
-       * `isDev === true` even without `ELECTRON_DEV=1`. If webSecurity stayed on here,
-       * Next’s dev scripts/HMR are blocked and the window stays blank.
-       * Packaged production uses `isDev === false` → webSecurity stays enabled.
-       */
       webSecurity: !isDev,
     },
-    // In dev, show immediately so the window is never invisible if load stalls or HMR is slow.
     show: isDev,
   });
 
@@ -181,9 +170,9 @@ async function createWindowAsync() {
   });
 }
 
-function workspaceFilePath(folderPath) {
-  return path.join(folderPath, WORKSPACE_FILENAME);
-}
+// ---------------------------------------------------------------------------
+// Window IPC
+// ---------------------------------------------------------------------------
 
 ipcMain.handle("window:minimize", () => {
   const w = BrowserWindow.getFocusedWindow() ?? mainWindow;
@@ -207,6 +196,10 @@ ipcMain.handle("window:is-maximized", () => {
   return w?.isMaximized() ?? false;
 });
 
+// ---------------------------------------------------------------------------
+// Folder picker
+// ---------------------------------------------------------------------------
+
 ipcMain.handle("workspace:open-folder", async () => {
   const win = BrowserWindow.getFocusedWindow() ?? mainWindow;
   const result = await dialog.showOpenDialog(win ?? undefined, {
@@ -217,11 +210,19 @@ ipcMain.handle("workspace:open-folder", async () => {
   return result.filePaths[0];
 });
 
+// ---------------------------------------------------------------------------
+// Legacy workspace file support (v1 migration)
+// ---------------------------------------------------------------------------
+
+function legacyWorkspacePath(folderPath) {
+  return path.join(folderPath, LEGACY_WORKSPACE_FILENAME);
+}
+
 ipcMain.handle("workspace:read", async (_event, folderPath) => {
   if (typeof folderPath !== "string" || !path.isAbsolute(folderPath)) {
     throw new Error("Invalid folder path");
   }
-  const fp = workspaceFilePath(folderPath);
+  const fp = legacyWorkspacePath(folderPath);
   try {
     const data = await fsp.readFile(fp, "utf8");
     return { ok: true, data };
@@ -240,13 +241,115 @@ ipcMain.handle("workspace:write", async (_event, folderPath, contents) => {
   if (typeof contents !== "string") {
     throw new Error("Invalid workspace contents");
   }
-  const fp = workspaceFilePath(folderPath);
+  const fp = legacyWorkspacePath(folderPath);
   const dir = path.dirname(fp);
   await fsp.mkdir(dir, { recursive: true });
-  const tmp = path.join(folderPath, `.${WORKSPACE_FILENAME}.tmp`);
+  const tmp = path.join(folderPath, `.${LEGACY_WORKSPACE_FILENAME}.tmp`);
   await fsp.writeFile(tmp, contents, "utf8");
   await fsp.rename(tmp, fp);
 });
+
+// ---------------------------------------------------------------------------
+// New filesystem IPC — generic file operations for workspace v2
+// ---------------------------------------------------------------------------
+
+function validateAbsolute(p) {
+  if (typeof p !== "string" || !path.isAbsolute(p)) {
+    throw new Error("Expected an absolute path");
+  }
+}
+
+ipcMain.handle("fs:read-dir", async (_event, dirPath) => {
+  validateAbsolute(dirPath);
+  const entries = await fsp.readdir(dirPath, { withFileTypes: true });
+  return entries
+    .filter((e) => !e.name.startsWith("."))
+    .map((e) => ({
+      name: e.name,
+      isDirectory: e.isDirectory(),
+    }));
+});
+
+ipcMain.handle("fs:read-text-file", async (_event, filePath) => {
+  validateAbsolute(filePath);
+  try {
+    return await fsp.readFile(filePath, "utf8");
+  } catch (e) {
+    if (e && e.code === "ENOENT") return null;
+    throw e;
+  }
+});
+
+ipcMain.handle("fs:write-text-file", async (_event, filePath, contents) => {
+  validateAbsolute(filePath);
+  if (typeof contents !== "string") throw new Error("Contents must be a string");
+  await fsp.mkdir(path.dirname(filePath), { recursive: true });
+  const tmp = filePath + ".tmp";
+  await fsp.writeFile(tmp, contents, "utf8");
+  await fsp.rename(tmp, filePath);
+});
+
+ipcMain.handle("fs:create-dir", async (_event, dirPath) => {
+  validateAbsolute(dirPath);
+  await fsp.mkdir(dirPath, { recursive: true });
+});
+
+ipcMain.handle("fs:delete-path", async (_event, targetPath) => {
+  validateAbsolute(targetPath);
+  await fsp.rm(targetPath, { recursive: true, force: true });
+});
+
+ipcMain.handle("fs:rename-path", async (_event, oldPath, newPath) => {
+  validateAbsolute(oldPath);
+  validateAbsolute(newPath);
+  await fsp.rename(oldPath, newPath);
+});
+
+ipcMain.handle("fs:path-exists", async (_event, targetPath) => {
+  validateAbsolute(targetPath);
+  try {
+    await fsp.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+ipcMain.handle("fs:read-workspace-config", async (_event, folderPath) => {
+  validateAbsolute(folderPath);
+  const configPath = path.join(folderPath, WORKSPACE_CONFIG_DIR, WORKSPACE_CONFIG_FILE);
+  try {
+    return await fsp.readFile(configPath, "utf8");
+  } catch (e) {
+    if (e && e.code === "ENOENT") return null;
+    throw e;
+  }
+});
+
+ipcMain.handle("fs:write-workspace-config", async (_event, folderPath, contents) => {
+  validateAbsolute(folderPath);
+  if (typeof contents !== "string") throw new Error("Contents must be a string");
+  const configDir = path.join(folderPath, WORKSPACE_CONFIG_DIR);
+  await fsp.mkdir(configDir, { recursive: true });
+  const configPath = path.join(configDir, WORKSPACE_CONFIG_FILE);
+  const tmp = configPath + ".tmp";
+  await fsp.writeFile(tmp, contents, "utf8");
+  await fsp.rename(tmp, configPath);
+});
+
+ipcMain.handle("fs:has-legacy-workspace", async (_event, folderPath) => {
+  validateAbsolute(folderPath);
+  try {
+    await fsp.access(legacyWorkspacePath(folderPath));
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// App lifecycle
+// ---------------------------------------------------------------------------
 
 app.whenReady().then(() => {
   if (isDev) {

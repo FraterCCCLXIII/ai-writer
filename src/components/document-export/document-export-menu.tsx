@@ -26,16 +26,20 @@ type Props = {
 };
 
 export function DocumentExportMenu({ triggerClassName }: Props) {
-  const project = useProjectStore((s) => s.project);
-  const activeChapterId = useProjectStore((s) => s.activeChapterId);
-  const chapters = useProjectStore((s) => s.chapters);
+  const config = useProjectStore((s) => s.config);
+  const openFiles = useProjectStore((s) => s.openFiles);
+  const activeFilePath = config.activeFilePath;
 
-  if (project.editorLayout !== "singleDocument") return null;
+  if (!activeFilePath) return null;
 
-  const content = chapters.find((c) => c.id === activeChapterId)?.content;
-  if (!content) return null;
+  const entry = openFiles.get(activeFilePath);
+  if (!entry) return null;
 
-  const basename = defaultExportBasename(project.title, project.singleFileName);
+  const content = entry.content;
+  const basename = defaultExportBasename(
+    config.project.title,
+    activeFilePath.replace(/\.[^.]+$/, ""),
+  );
 
   const run = (label: string, fn: () => void | Promise<void>) => {
     void (async () => {

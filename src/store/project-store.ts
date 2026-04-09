@@ -1,20 +1,36 @@
 import { create } from "zustand";
 import { toast } from "sonner";
 import type { JSONContent } from "novel";
+import type { ChatMessage } from "@/documents/types";
 import type {
-  Chapter,
-  ChatMessage,
-  PersistedWorkspace,
-  ProjectIndexEntry,
-  ProjectMeta,
-  ResearchDocument,
-} from "@/documents/types";
+  WorkspaceConfig,
+  WorkspaceNode,
+  FileNode,
+  OpenFileEntry,
+} from "@/documents/workspace-types";
 import {
-  loadProjectIndex,
-  saveWorkspaceForProject,
-} from "@/lib/persistence";
+  buildDefaultConfig,
+  collectFiles,
+  createId,
+  insertNode,
+  removeNode,
+  renameNodeInTree,
+  toggleFolderExpanded,
+} from "@/documents/workspace-types";
+import {
+  writeWorkspaceConfig,
+  readWorkspaceFile,
+  writeWorkspaceFile,
+  createWorkspaceFile,
+  createWorkspaceDir,
+  deleteWorkspacePath,
+  renameWorkspacePath,
+  loadWorkspaceIndex,
+  openFolderWorkspace,
+  type WorkspaceIndexEntry,
+} from "@/lib/workspace-fs";
+import { jsonContentToMarkdown, markdownToJsonContent, isEditableFile } from "@/lib/markdown-serialize";
 import { paragraphDocFromPlainText } from "@/lib/plain-text-insert";
-import { parsePersistedWorkspace } from "@/lib/workspace-schema";
 import type { ChatMode, TodoItem, WriteMutation } from "@/lib/ai/types";
 
 const emptyDoc: JSONContent = {
@@ -22,172 +38,114 @@ const emptyDoc: JSONContent = {
   content: [{ type: "paragraph" }],
 };
 
-function createId() {
-  return typeof crypto !== "undefined" && crypto.randomUUID
-    ? crypto.randomUUID()
-    : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function snapshotFromState(state: {
-  project: ProjectMeta;
-  chapters: Chapter[];
-  activeChapterId: string | null;
-  openTabs: string[];
-  chatMessages: ChatMessage[];
-  researchDocuments: ResearchDocument[];
-}): PersistedWorkspace {
-  return {
-    version: 1,
-    project: state.project,
-    chapters: state.chapters,
-    activeChapterId: state.activeChapterId,
-    openTabs: state.openTabs,
-    chatMessages: state.chatMessages,
-    researchDocuments: state.researchDocuments,
-    updatedAt: Date.now(),
-  };
-}
-
-function buildDefaultProject(): { project: ProjectMeta; chapters: Chapter[] } {
-  const cid = createId();
-  return {
-    project: {
-      id: createId(),
-      title: "Untitled manuscript",
-      description: "",
-    },
-    chapters: [
-      {
-        id: cid,
-        title: "Chapter 1",
-        content: emptyDoc,
-        order: 0,
-      },
-    ],
-  };
-}
-
 export type WorkspaceScreen = "home" | "editor";
 
 type ProjectState = {
-  /** Recent projects (IndexedDB index), for the home screen. */
-  recentProjects: ProjectIndexEntry[];
+  recentProjects: WorkspaceIndexEntry[];
+
   /**
-   * When non-null (Electron), the workspace is saved under this folder as
-   * `manuscript.workspace.json` instead of only in IndexedDB.
+   * The folder path (Electron) or IDB workspace id (browser) for the
+   * currently open workspace. Null until a workspace is opened.
    */
-  activeFolderPath: string | null;
+  workspacePath: string | null;
+
   workspaceScreen: WorkspaceScreen;
-  project: ProjectMeta;
-  chapters: Chapter[];
-  activeChapterId: string | null;
-  openTabs: string[];
-  chatMessages: ChatMessage[];
+  config: WorkspaceConfig;
+
+  /** In-memory file contents, loaded on demand. */
+  openFiles: Map<string, OpenFileEntry>;
+
   focusMode: boolean;
   leftSidebarOpen: boolean;
   rightSidebarOpen: boolean;
-  /** Non-null while a passage is attached as chat context (survives editor blur). */
+
   editorContext: {
     text: string;
-    chapterId: string;
+    filePath: string;
     from: number;
     to: number;
   } | null;
-  /** After chat streams a replacement for a selection; manuscript shows approve/cancel. */
+
   pendingRevision: {
-    chapterId: string;
+    filePath: string;
     from: number;
     to: number;
     replacementText: string;
     assistantMessageId: string;
   } | null;
-  /** Reference notes (left sidebar); when set, main editor shows this instead of the active chapter. */
-  researchDocuments: ResearchDocument[];
-  activeResearchId: string | null;
 
-  setProjectField: (patch: Partial<ProjectMeta>) => void;
-  selectChapter: (id: string) => void;
-  addChapter: () => void;
-  renameChapter: (id: string, title: string) => void;
-  removeChapter: (id: string) => void;
-  reorderChapters: (orderedIds: string[]) => void;
-  updateChapterContent: (id: string, content: JSONContent) => void;
-  addResearchDocument: () => void;
-  importResearchDocument: (file: File) => Promise<void>;
-  /** Import several research files in one batch (shared file picker). */
-  importResearchDocuments: (
-    files: File[] | FileList,
-  ) => Promise<{
-    imported: number;
-    failed: { name: string; message: string }[];
-  }>;
-  renameResearchDocument: (id: string, title: string) => void;
-  removeResearchDocument: (id: string) => void;
-  selectResearchDocument: (id: string) => void;
-  updateResearchContent: (id: string, content: JSONContent) => void;
-  openTab: (id: string) => void;
-  closeTab: (id: string) => void;
+  chatMode: ChatMode;
+  agentTodos: TodoItem[];
+
+  fileImportPickRequest: number;
+
+  // --- Actions ---
+
+  setRecentProjectsFromIndex: (entries: WorkspaceIndexEntry[]) => void;
+
+  /** Open a workspace (folder-backed or IDB). Loads config, sets up state. */
+  openWorkspace: (workspacePath: string, config: WorkspaceConfig) => void;
+
+  /** Start a new blank workspace. In Electron, prompts for folder first. */
+  startNewProject: () => void;
+
+  /** Electron: pick folder, load or init workspace. */
+  openFolderProject: () => Promise<void>;
+
+  /** Navigate back to the home screen. */
+  goHome: () => void;
+
+  // Tree operations
+  selectFile: (path: string) => Promise<void>;
+  createFile: (parentPath: string | null, name: string) => Promise<void>;
+  createFolder: (parentPath: string | null, name: string) => Promise<void>;
+  renameNode: (oldPath: string, newName: string) => Promise<void>;
+  deleteNode: (path: string) => Promise<void>;
+  toggleFolder: (path: string) => void;
+
+  /** Update the content of the currently active file from editor changes. */
+  updateActiveFileContent: (content: JSONContent) => void;
+
+  // Project metadata
+  setProjectTitle: (title: string) => void;
+
+  // Chat
   appendChatMessage: (msg: Omit<ChatMessage, "id" | "createdAt">) => ChatMessage;
   patchChatMessage: (id: string, content: string) => void;
   setChatMessages: (messages: ChatMessage[]) => void;
   clearChat: () => void;
-  flushWorkspace: () => void;
+
+  // UI toggles
   setFocusMode: (v: boolean) => void;
   toggleLeftSidebar: () => void;
   toggleRightSidebar: () => void;
   setEditorContext: (
-    ctx: {
-      text: string;
-      chapterId: string;
-      from: number;
-      to: number;
-    } | null,
+    ctx: { text: string; filePath: string; from: number; to: number } | null,
   ) => void;
   setPendingRevision: (
     rev: {
-      chapterId: string;
+      filePath: string;
       from: number;
       to: number;
       replacementText: string;
       assistantMessageId: string;
     } | null,
   ) => void;
-  importWorkspace: (data: {
-    project: ProjectMeta;
-    chapters: Chapter[];
-    activeChapterId: string | null;
-    openTabs: string[];
-    chatMessages: ChatMessage[];
-    researchDocuments?: ResearchDocument[];
-  }) => void;
-  setRecentProjectsFromIndex: (entries: ProjectIndexEntry[]) => void;
-  startNewProject: () => void;
-  startNewProjectFromPrompt: (prompt: string) => void;
-  openPersistedWorkspace: (
-    data: PersistedWorkspace,
-    folderPath?: string | null,
-  ) => void;
-  openProjectFromJson: (data: unknown) => void;
-  /** Electron: pick a folder; load existing workspace file or create a new project there. */
-  openFolderProject: () => Promise<void>;
-  goHome: () => void;
 
-  /** Increments so `FileImportHost` opens the hidden file picker. */
-  fileImportPickRequest: number;
-  requestFileImport: () => void;
-  /** Import a non-workspace file as a single editable document. */
-  openImportedFile: (file: File) => Promise<void>;
-
-  /** Active chat mode (Ask / Edit / Agent). Persisted with workspace. */
-  chatMode: ChatMode;
   setChatMode: (mode: ChatMode) => void;
-
-  /** Agent session todos — session-only, not persisted. */
-  agentTodos: TodoItem[];
   setAgentTodos: (todos: TodoItem[]) => void;
+  requestFileImport: () => void;
 
-  /** Apply write mutations produced by an agent run to the workspace. */
+  /** Persist the current workspace config to disk/IDB. */
+  flushWorkspace: () => void;
+
+  /** Apply write mutations from the AI agent. */
   applyWriteMutations: (mutations: WriteMutation[]) => void;
+
+  // Convenience getters
+  getActiveFilePath: () => string | null;
+  getActiveFileContent: () => JSONContent | null;
+  getTree: () => WorkspaceNode[];
 };
 
 export const useProjectStore = create<ProjectState>((set, get) => {
@@ -197,294 +155,344 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     if (persistTimer) clearTimeout(persistTimer);
     persistTimer = setTimeout(() => {
       const s = get();
-      const data = snapshotFromState(s);
-      void saveWorkspaceForProject(s.project.id, data, {
-        folderPath: s.activeFolderPath ?? undefined,
-      }).then(async () => {
-        const entries = await loadProjectIndex();
+      if (!s.workspacePath) return;
+
+      const updatedConfig: WorkspaceConfig = {
+        ...s.config,
+        updatedAt: Date.now(),
+      };
+
+      void writeWorkspaceConfig(s.workspacePath, updatedConfig).then(async () => {
+        const entries = await loadWorkspaceIndex();
         set({ recentProjects: entries });
       });
     }, 400);
   };
 
-  const defaults = buildDefaultProject();
+  const scheduleFileSave = (filePath: string) => {
+    const s = get();
+    if (!s.workspacePath) return;
+
+    const entry = s.openFiles.get(filePath);
+    if (!entry || !entry.dirty) return;
+
+    const md = jsonContentToMarkdown(entry.content);
+    void writeWorkspaceFile(s.workspacePath, filePath, md).then(() => {
+      const current = get();
+      const updated = new Map(current.openFiles);
+      const existing = updated.get(filePath);
+      if (existing) {
+        updated.set(filePath, { ...existing, dirty: false });
+        set({ openFiles: updated });
+      }
+    });
+  };
+
+  const defaultConfig = buildDefaultConfig();
+
   return {
     recentProjects: [],
-    activeFolderPath: null,
-    fileImportPickRequest: 0,
+    workspacePath: null,
     workspaceScreen: "home",
-    project: defaults.project,
-    chapters: defaults.chapters,
-    activeChapterId: defaults.chapters[0]?.id ?? null,
-    openTabs: defaults.chapters[0] ? [defaults.chapters[0].id] : [],
-    chatMessages: [],
+    config: defaultConfig,
+    openFiles: new Map(),
     focusMode: false,
     leftSidebarOpen: true,
     rightSidebarOpen: true,
     editorContext: null,
     pendingRevision: null,
-    researchDocuments: [],
-    activeResearchId: null,
     chatMode: "ask" as ChatMode,
     agentTodos: [],
+    fileImportPickRequest: 0,
 
-    setProjectField: (patch) => {
-      set((s) => ({ project: { ...s.project, ...patch } }));
-      schedulePersist();
-    },
+    setRecentProjectsFromIndex: (entries) => set({ recentProjects: entries }),
 
-    selectChapter: (id) => {
-      set((s) => ({
-        activeChapterId: id,
-        activeResearchId: null,
-        openTabs: s.openTabs.includes(id) ? s.openTabs : [...s.openTabs, id],
-        editorContext:
-          s.editorContext?.chapterId === id ? s.editorContext : null,
-        pendingRevision:
-          s.pendingRevision?.chapterId === id ? s.pendingRevision : null,
-      }));
-      schedulePersist();
-    },
-
-    addChapter: () => {
-      if (get().project.editorLayout === "singleDocument") {
-        toast.message("Switch to a manuscript project to add chapters.");
-        return;
-      }
-      const nextOrder =
-        get().chapters.reduce((m, c) => Math.max(m, c.order), -1) + 1;
-      const ch: Chapter = {
-        id: createId(),
-        title: `Chapter ${nextOrder + 1}`,
-        content: emptyDoc,
-        order: nextOrder,
-      };
-      set((s) => ({
-        chapters: [...s.chapters, ch].sort((a, b) => a.order - b.order),
-        activeChapterId: ch.id,
-        activeResearchId: null,
-        openTabs: [...s.openTabs, ch.id],
+    openWorkspace: (workspacePath, config) => {
+      set({
+        workspacePath,
+        config,
+        openFiles: new Map(),
+        workspaceScreen: "editor",
         editorContext: null,
         pendingRevision: null,
-      }));
-      schedulePersist();
+        focusMode: false,
+        leftSidebarOpen: true,
+      });
+
+      if (config.activeFilePath) {
+        void get().selectFile(config.activeFilePath);
+      }
     },
 
-    renameChapter: (id, title) => {
-      set((s) => ({
-        chapters: s.chapters.map((c) => (c.id === id ? { ...c, title } : c)),
-      }));
-      schedulePersist();
-    },
-
-    removeChapter: (id) => {
-      if (get().project.editorLayout === "singleDocument") {
-        toast.message("Use a manuscript project to manage multiple chapters.");
+    startNewProject: () => {
+      const isElectron =
+        typeof window !== "undefined" && Boolean(window.electronAPI);
+      if (isElectron) {
+        void get().openFolderProject();
         return;
       }
-      set((s) => {
-        const remaining = s.chapters.filter((c) => c.id !== id);
-        if (remaining.length === 0) {
-          const neo = buildDefaultProject();
-          return {
-            project: neo.project,
-            chapters: neo.chapters,
-            activeChapterId: neo.chapters[0]!.id,
-            openTabs: [neo.chapters[0]!.id],
-          };
+
+      const config = buildDefaultConfig();
+      const wsId = config.project.id;
+
+      set({
+        workspacePath: wsId,
+        config,
+        openFiles: new Map(),
+        workspaceScreen: "editor",
+        editorContext: null,
+        pendingRevision: null,
+        focusMode: false,
+        leftSidebarOpen: true,
+      });
+
+      void (async () => {
+        const firstFile = collectFiles(config.tree)[0];
+        if (firstFile) {
+          await createWorkspaceFile(wsId, firstFile.path, "");
         }
-        const nextActive =
-          s.activeChapterId === id
-            ? remaining[0]!.id
-            : s.activeChapterId;
-        return {
-          chapters: remaining.map((c, i) => ({ ...c, order: i })),
-          activeChapterId: nextActive,
-          openTabs: s.openTabs.filter((t) => t !== id),
-        };
-      });
-      schedulePersist();
+        await writeWorkspaceConfig(wsId, config);
+        const entries = await loadWorkspaceIndex();
+        set({ recentProjects: entries });
+
+        if (config.activeFilePath) {
+          await get().selectFile(config.activeFilePath);
+        }
+      })();
     },
 
-    reorderChapters: (orderedIds) => {
-      set((s) => {
-        const map = new Map(s.chapters.map((c) => [c.id, c] as const));
-        const next: Chapter[] = orderedIds
-          .map((id, order) => {
-            const c = map.get(id);
-            return c ? { ...c, order } : null;
-          })
-          .filter(Boolean) as Chapter[];
-        const rest = s.chapters.filter((c) => !orderedIds.includes(c.id));
-        return { chapters: [...next, ...rest].sort((a, b) => a.order - b.order) };
-      });
-      schedulePersist();
+    openFolderProject: async () => {
+      const api =
+        typeof window !== "undefined" ? window.electronAPI : undefined;
+      if (!api) return;
+
+      const dirPath = await api.openFolder();
+      if (!dirPath) return;
+
+      try {
+        const { config } = await openFolderWorkspace(dirPath);
+        get().openWorkspace(dirPath, config);
+      } catch (e) {
+        toast.error(
+          e instanceof Error ? e.message : "Could not open that folder.",
+        );
+      }
     },
 
-    updateChapterContent: (id, content) => {
-      set((s) => ({
-        chapters: s.chapters.map((c) =>
-          c.id === id ? { ...c, content } : c,
-        ),
-      }));
-      schedulePersist();
-    },
-
-    addResearchDocument: () => {
+    goHome: () => {
       const s = get();
-      const nextOrder =
-        s.researchDocuments.reduce((m, d) => Math.max(m, d.order), -1) + 1;
-      const doc: ResearchDocument = {
-        id: createId(),
-        title: `Research ${nextOrder + 1}`,
-        content: emptyDoc,
-        order: nextOrder,
-      };
-      set({
-        researchDocuments: [...s.researchDocuments, doc].sort(
-          (a, b) => a.order - b.order,
-        ),
-        activeResearchId: doc.id,
-        editorContext: null,
-        pendingRevision: null,
-      });
-      schedulePersist();
-    },
-
-    importResearchDocuments: async (files: File[] | FileList) => {
-      const list = Array.from(files).filter((f) => f != null);
-      if (list.length === 0) {
-        return { imported: 0, failed: [] };
-      }
-
-      const { importFileToEditorContent } = await import(
-        "@/lib/document-import/import-file-to-editor"
-      );
-
-      const s0 = get();
-      let nextOrder =
-        s0.researchDocuments.reduce((m, d) => Math.max(m, d.order), -1) + 1;
-      const newDocs: ResearchDocument[] = [];
-      const failed: { name: string; message: string }[] = [];
-
-      for (const file of list) {
-        try {
-          const content = await importFileToEditorContent(file);
-          const base =
-            file.name.replace(/\.[^.]+$/, "").trim() || "Imported research";
-          newDocs.push({
-            id: createId(),
-            title: base,
-            content,
-            order: nextOrder,
-            sourceFileName: file.name,
-          });
-          nextOrder += 1;
-        } catch (e) {
-          failed.push({
-            name: file.name,
-            message: e instanceof Error ? e.message : "Could not import file.",
-          });
-        }
-      }
-
-      if (newDocs.length > 0) {
-        set({
-          researchDocuments: [...s0.researchDocuments, ...newDocs].sort(
-            (a, b) => a.order - b.order,
-          ),
-          activeResearchId: newDocs[newDocs.length - 1]!.id,
-          editorContext: null,
-          pendingRevision: null,
+      if (s.workspacePath && s.config) {
+        void writeWorkspaceConfig(s.workspacePath, {
+          ...s.config,
+          updatedAt: Date.now(),
+        }).then(async () => {
+          const entries = await loadWorkspaceIndex();
+          set({ recentProjects: entries });
         });
-        schedulePersist();
       }
 
-      return { imported: newDocs.length, failed };
-    },
-
-    importResearchDocument: async (file: File) => {
-      const { imported, failed } = await get().importResearchDocuments([file]);
-      if (imported === 0 && failed.length > 0) {
-        throw new Error(failed[0]!.message);
-      }
-    },
-
-    renameResearchDocument: (id, title) => {
-      set((s) => ({
-        researchDocuments: s.researchDocuments.map((d) =>
-          d.id === id ? { ...d, title } : d,
-        ),
-      }));
-      schedulePersist();
-    },
-
-    removeResearchDocument: (id) => {
-      set((s) => {
-        const remaining = s.researchDocuments.filter((d) => d.id !== id);
-        let activeResearchId = s.activeResearchId;
-        if (activeResearchId === id) {
-          activeResearchId = null;
-        }
-        return {
-          researchDocuments: remaining.map((d, i) => ({ ...d, order: i })),
-          activeResearchId,
-        };
-      });
-      schedulePersist();
-    },
-
-    selectResearchDocument: (id) => {
       set({
-        activeResearchId: id,
+        workspaceScreen: "home",
+        focusMode: false,
         editorContext: null,
         pendingRevision: null,
       });
+    },
+
+    selectFile: async (filePath) => {
+      const s = get();
+
+      set((prev) => ({
+        config: { ...prev.config, activeFilePath: filePath },
+        editorContext: null,
+        pendingRevision: null,
+      }));
+
+      if (s.openFiles.has(filePath)) {
+        schedulePersist();
+        return;
+      }
+
+      if (s.workspacePath && isEditableFile(filePath)) {
+        const raw = await readWorkspaceFile(s.workspacePath, filePath);
+        const content = raw ? markdownToJsonContent(raw) : emptyDoc;
+
+        set((prev) => {
+          const updated = new Map(prev.openFiles);
+          updated.set(filePath, { path: filePath, content, dirty: false });
+          return { openFiles: updated };
+        });
+      }
+
       schedulePersist();
     },
 
-    updateResearchContent: (id, content) => {
-      set((s) => ({
-        researchDocuments: s.researchDocuments.map((d) =>
-          d.id === id ? { ...d, content } : d,
-        ),
+    createFile: async (parentPath, name) => {
+      const s = get();
+      if (!s.workspacePath) return;
+
+      const relativePath = parentPath ? `${parentPath}/${name}` : name;
+
+      const node: FileNode = {
+        kind: "file",
+        id: createId(),
+        name,
+        path: relativePath,
+      };
+
+      set((prev) => ({
+        config: {
+          ...prev.config,
+          tree: insertNode(prev.config.tree, node, parentPath),
+          activeFilePath: relativePath,
+        },
+      }));
+
+      await createWorkspaceFile(s.workspacePath, relativePath, "");
+
+      const updated = new Map(get().openFiles);
+      updated.set(relativePath, { path: relativePath, content: emptyDoc, dirty: false });
+      set({ openFiles: updated });
+
+      schedulePersist();
+    },
+
+    createFolder: async (parentPath, name) => {
+      const s = get();
+      if (!s.workspacePath) return;
+
+      const relativePath = parentPath ? `${parentPath}/${name}` : name;
+
+      const node: WorkspaceNode = {
+        kind: "folder",
+        id: createId(),
+        name,
+        path: relativePath,
+        children: [],
+        expanded: true,
+      };
+
+      set((prev) => ({
+        config: {
+          ...prev.config,
+          tree: insertNode(prev.config.tree, node, parentPath),
+        },
+      }));
+
+      await createWorkspaceDir(s.workspacePath, relativePath);
+      schedulePersist();
+    },
+
+    renameNode: async (oldPath, newName) => {
+      const s = get();
+      if (!s.workspacePath) return;
+
+      const oldParent = oldPath.includes("/")
+        ? oldPath.substring(0, oldPath.lastIndexOf("/"))
+        : "";
+      const newPath = oldParent ? `${oldParent}/${newName}` : newName;
+
+      set((prev) => {
+        const newTree = renameNodeInTree(prev.config.tree, oldPath, newName);
+        const newActiveFilePath =
+          prev.config.activeFilePath === oldPath
+            ? newPath
+            : prev.config.activeFilePath?.startsWith(oldPath + "/")
+              ? prev.config.activeFilePath.replace(oldPath, newPath)
+              : prev.config.activeFilePath;
+
+        const newOpenFiles = new Map<string, OpenFileEntry>();
+        for (const [key, entry] of prev.openFiles) {
+          if (key === oldPath) {
+            newOpenFiles.set(newPath, { ...entry, path: newPath });
+          } else if (key.startsWith(oldPath + "/")) {
+            const updated = key.replace(oldPath, newPath);
+            newOpenFiles.set(updated, { ...entry, path: updated });
+          } else {
+            newOpenFiles.set(key, entry);
+          }
+        }
+
+        return {
+          config: {
+            ...prev.config,
+            tree: newTree,
+            activeFilePath: newActiveFilePath,
+          },
+          openFiles: newOpenFiles,
+        };
+      });
+
+      await renameWorkspacePath(s.workspacePath, oldPath, newPath);
+      schedulePersist();
+    },
+
+    deleteNode: async (path) => {
+      const s = get();
+      if (!s.workspacePath) return;
+
+      const tree = removeNode(s.config.tree, path);
+      let activeFilePath = s.config.activeFilePath;
+
+      if (activeFilePath === path || activeFilePath?.startsWith(path + "/")) {
+        const allFiles = collectFiles(tree);
+        activeFilePath = allFiles[0]?.path ?? null;
+      }
+
+      set((prev) => {
+        const newOpenFiles = new Map(prev.openFiles);
+        for (const key of newOpenFiles.keys()) {
+          if (key === path || key.startsWith(path + "/")) {
+            newOpenFiles.delete(key);
+          }
+        }
+        return {
+          config: { ...prev.config, tree, activeFilePath },
+          openFiles: newOpenFiles,
+        };
+      });
+
+      await deleteWorkspacePath(s.workspacePath, path);
+
+      if (activeFilePath && !s.openFiles.has(activeFilePath)) {
+        await get().selectFile(activeFilePath);
+      }
+
+      schedulePersist();
+    },
+
+    toggleFolder: (folderPath) => {
+      set((prev) => ({
+        config: {
+          ...prev.config,
+          tree: toggleFolderExpanded(prev.config.tree, folderPath),
+        },
       }));
       schedulePersist();
     },
 
-    openTab: (id) =>
-      set((s) => ({
-        openTabs: s.openTabs.includes(id) ? s.openTabs : [...s.openTabs, id],
-        activeChapterId: id,
-        activeResearchId: null,
-        editorContext:
-          s.editorContext?.chapterId === id ? s.editorContext : null,
-        pendingRevision:
-          s.pendingRevision?.chapterId === id ? s.pendingRevision : null,
-      })),
+    updateActiveFileContent: (content) => {
+      const s = get();
+      const filePath = s.config.activeFilePath;
+      if (!filePath) return;
 
-    closeTab: (id) => {
-      set((s) => {
-        const openTabs = s.openTabs.filter((t) => t !== id);
-        let activeChapterId = s.activeChapterId;
-        if (activeChapterId === id) {
-          activeChapterId = openTabs[openTabs.length - 1] ?? s.chapters[0]?.id ?? null;
-        }
-        return {
-          openTabs,
-          activeChapterId,
-          editorContext:
-            activeChapterId &&
-            s.editorContext?.chapterId === activeChapterId
-              ? s.editorContext
-              : null,
-          pendingRevision:
-            activeChapterId &&
-            s.pendingRevision?.chapterId === activeChapterId
-              ? s.pendingRevision
-              : null,
-        };
+      set((prev) => {
+        const updated = new Map(prev.openFiles);
+        updated.set(filePath, { path: filePath, content, dirty: true });
+        return { openFiles: updated };
       });
+
+      scheduleFileSave(filePath);
+      schedulePersist();
+    },
+
+    setProjectTitle: (title) => {
+      set((prev) => ({
+        config: {
+          ...prev.config,
+          project: { ...prev.config.project, title },
+        },
+      }));
       schedulePersist();
     },
 
@@ -494,303 +502,105 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         id: createId(),
         createdAt: Date.now(),
       };
-      set((s) => ({ chatMessages: [...s.chatMessages, full] }));
+      set((prev) => ({
+        config: {
+          ...prev.config,
+          chatMessages: [...prev.config.chatMessages, full],
+        },
+      }));
       schedulePersist();
       return full;
     },
 
     patchChatMessage: (id, content) => {
-      set((s) => ({
-        chatMessages: s.chatMessages.map((m) =>
-          m.id === id ? { ...m, content } : m,
-        ),
+      set((prev) => ({
+        config: {
+          ...prev.config,
+          chatMessages: prev.config.chatMessages.map((m) =>
+            m.id === id ? { ...m, content } : m,
+          ),
+        },
       }));
     },
 
     setChatMessages: (messages) => {
-      set({ chatMessages: messages });
+      set((prev) => ({
+        config: { ...prev.config, chatMessages: messages },
+      }));
+      schedulePersist();
+    },
+
+    clearChat: () => {
+      set((prev) => ({
+        config: { ...prev.config, chatMessages: [] },
+        pendingRevision: null,
+      }));
       schedulePersist();
     },
 
     flushWorkspace: () => {
       const s = get();
-      const data = snapshotFromState(s);
-      void saveWorkspaceForProject(s.project.id, data, {
-        folderPath: s.activeFolderPath ?? undefined,
-      }).then(async () => {
-        const entries = await loadProjectIndex();
+      if (!s.workspacePath) return;
+
+      const updatedConfig: WorkspaceConfig = {
+        ...s.config,
+        updatedAt: Date.now(),
+      };
+
+      void writeWorkspaceConfig(s.workspacePath, updatedConfig).then(async () => {
+        const entries = await loadWorkspaceIndex();
         set({ recentProjects: entries });
       });
     },
 
-    clearChat: () => {
-      set({ chatMessages: [], pendingRevision: null });
-      schedulePersist();
-    },
-
     setFocusMode: (v) => set({ focusMode: v }),
-
     toggleLeftSidebar: () =>
       set((s) => ({ leftSidebarOpen: !s.leftSidebarOpen })),
-
     toggleRightSidebar: () =>
       set((s) => ({ rightSidebarOpen: !s.rightSidebarOpen })),
-
     setEditorContext: (ctx) => set({ editorContext: ctx }),
-
     setPendingRevision: (rev) => set({ pendingRevision: rev }),
-
-    importWorkspace: (data) => {
-      set({
-        project: data.project,
-        chapters: data.chapters,
-        activeChapterId: data.activeChapterId,
-        openTabs:
-          data.openTabs.length > 0 ? data.openTabs : [data.chapters[0]?.id].filter(Boolean) as string[],
-        chatMessages: data.chatMessages,
-        researchDocuments: data.researchDocuments ?? [],
-        activeResearchId: null,
-      });
-      schedulePersist();
-    },
-
-    setRecentProjectsFromIndex: (entries) => set({ recentProjects: entries }),
-
-    startNewProject: () => {
-      set({ activeFolderPath: null });
-      const neo = buildDefaultProject();
-      get().importWorkspace({
-        project: {
-          ...neo.project,
-          editorLayout: undefined,
-          singleFileName: undefined,
-        },
-        chapters: neo.chapters,
-        activeChapterId: neo.chapters[0]!.id,
-        openTabs: [neo.chapters[0]!.id],
-        chatMessages: [],
-      });
-      set({
-        workspaceScreen: "editor",
-        editorContext: null,
-        pendingRevision: null,
-        focusMode: false,
-      });
-    },
-
-    startNewProjectFromPrompt: (prompt: string) => {
-      const trimmed = prompt.trim();
-      if (!trimmed) return;
-      const firstLine =
-        trimmed
-          .split(/\r?\n/)
-          .map((l) => l.trim())
-          .find((l) => l.length > 0) ?? trimmed;
-      const title =
-        firstLine.length > 72
-          ? `${firstLine.slice(0, 69)}…`
-          : firstLine || "Untitled manuscript";
-      const cid = createId();
-      const project: ProjectMeta = {
-        id: createId(),
-        title,
-        description: trimmed,
-        editorLayout: undefined,
-        singleFileName: undefined,
-      };
-      const chapter: Chapter = {
-        id: cid,
-        title: "Chapter 1",
-        content: paragraphDocFromPlainText(trimmed),
-        order: 0,
-      };
-      set({ activeFolderPath: null });
-      get().importWorkspace({
-        project,
-        chapters: [chapter],
-        activeChapterId: cid,
-        openTabs: [cid],
-        chatMessages: [],
-      });
-      set({
-        workspaceScreen: "editor",
-        editorContext: null,
-        pendingRevision: null,
-        focusMode: false,
-      });
-    },
-
-    openPersistedWorkspace: (data, folderPath = null) => {
-      set({ activeFolderPath: folderPath });
-      get().importWorkspace({
-        project: data.project,
-        chapters: data.chapters,
-        activeChapterId: data.activeChapterId,
-        openTabs:
-          data.openTabs.length > 0
-            ? data.openTabs
-            : ([data.chapters[0]?.id].filter(Boolean) as string[]),
-        chatMessages: data.chatMessages,
-        researchDocuments: data.researchDocuments ?? [],
-      });
-      set({
-        workspaceScreen: "editor",
-        editorContext: null,
-        pendingRevision: null,
-        focusMode: false,
-      });
-    },
-
-    openProjectFromJson: (data: unknown) => {
-      const parsed = parsePersistedWorkspace(data);
-      if (!parsed) {
-        throw new Error("INVALID_WORKSPACE_FILE");
-      }
-      get().openPersistedWorkspace(parsed, null);
-    },
-
-    openFolderProject: async () => {
-      const api =
-        typeof window !== "undefined" ? window.electronAPI : undefined;
-      if (!api) return;
-      const dirPath = await api.openFolder();
-      if (!dirPath) return;
-      const res = await api.readWorkspaceFile(dirPath);
-      if (res.ok) {
-        let raw: unknown;
-        try {
-          raw = JSON.parse(res.data) as unknown;
-        } catch {
-          throw new Error("INVALID_WORKSPACE_FILE");
-        }
-        const parsed = parsePersistedWorkspace(raw);
-        if (!parsed) {
-          throw new Error("INVALID_WORKSPACE_FILE");
-        }
-        get().openPersistedWorkspace(parsed, dirPath);
-        return;
-      }
-      if (res.missing) {
-        set({ activeFolderPath: dirPath });
-        const neo = buildDefaultProject();
-        get().importWorkspace({
-          project: {
-            ...neo.project,
-            editorLayout: undefined,
-            singleFileName: undefined,
-          },
-          chapters: neo.chapters,
-          activeChapterId: neo.chapters[0]!.id,
-          openTabs: [neo.chapters[0]!.id],
-          chatMessages: [],
-        });
-        set({
-          workspaceScreen: "editor",
-          editorContext: null,
-          pendingRevision: null,
-          focusMode: false,
-        });
-        get().flushWorkspace();
-        return;
-      }
-    },
-
+    setChatMode: (mode) => set({ chatMode: mode }),
+    setAgentTodos: (todos) => set({ agentTodos: todos }),
     requestFileImport: () =>
       set((s) => ({ fileImportPickRequest: s.fileImportPickRequest + 1 })),
-
-    setChatMode: (mode) => set({ chatMode: mode }),
-
-    setAgentTodos: (todos) => set({ agentTodos: todos }),
 
     applyWriteMutations: (mutations) => {
       if (mutations.length === 0) return;
       const s = get();
-      let updatedChapters = [...s.chapters];
 
       for (const mutation of mutations) {
         if (mutation.type === "edit_chapter") {
-          updatedChapters = updatedChapters.map((ch) =>
-            ch.id === mutation.chapterId
-              ? { ...ch, content: paragraphDocFromPlainText(mutation.newPlainText) }
-              : ch,
-          );
+          const filePath = s.config.activeFilePath;
+          if (!filePath) continue;
+
+          const content = paragraphDocFromPlainText(mutation.newPlainText);
+
+          set((prev) => {
+            const updated = new Map(prev.openFiles);
+            updated.set(filePath, { path: filePath, content, dirty: true });
+            return { openFiles: updated };
+          });
+
+          scheduleFileSave(filePath);
         } else if (mutation.type === "create_chapter") {
-          const nextOrder =
-            updatedChapters.reduce((m, c) => Math.max(m, c.order), -1) + 1;
-          const id =
-            typeof crypto !== "undefined" && crypto.randomUUID
-              ? crypto.randomUUID()
-              : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-          updatedChapters = [
-            ...updatedChapters,
-            {
-              id,
-              title: mutation.title,
-              content: paragraphDocFromPlainText(mutation.plainText),
-              order: nextOrder,
-            },
-          ];
+          const name = mutation.title.replace(/[/\\?%*:|"<>]/g, "-") + ".md";
+          void get().createFile(null, name);
         }
       }
 
-      set({ chapters: updatedChapters });
       schedulePersist();
     },
 
-    openImportedFile: async (file: File) => {
-      const { importFileToEditorContent } = await import(
-        "@/lib/document-import/import-file-to-editor"
-      );
-      const content = await importFileToEditorContent(file);
-      const base =
-        file.name.replace(/\.[^.]+$/, "").trim() || "Untitled document";
-      const cid = createId();
-      const project: ProjectMeta = {
-        id: createId(),
-        title: base,
-        description: "",
-        editorLayout: "singleDocument",
-        singleFileName: file.name,
-      };
-      const chapter: Chapter = {
-        id: cid,
-        title: "Document",
-        content,
-        order: 0,
-      };
-      set({ activeFolderPath: null });
-      get().importWorkspace({
-        project,
-        chapters: [chapter],
-        activeChapterId: cid,
-        openTabs: [cid],
-        chatMessages: [],
-      });
-      set({
-        workspaceScreen: "editor",
-        editorContext: null,
-        pendingRevision: null,
-        focusMode: false,
-        leftSidebarOpen: false,
-      });
+    getActiveFilePath: () => get().config.activeFilePath,
+
+    getActiveFileContent: () => {
+      const s = get();
+      const fp = s.config.activeFilePath;
+      if (!fp) return null;
+      return s.openFiles.get(fp)?.content ?? null;
     },
 
-    goHome: () => {
-      const s = get();
-      const data = snapshotFromState(s);
-      void saveWorkspaceForProject(s.project.id, data, {
-        folderPath: s.activeFolderPath ?? undefined,
-      }).then(async () => {
-        const entries = await loadProjectIndex();
-        set({
-          recentProjects: entries,
-          workspaceScreen: "home",
-          focusMode: false,
-          editorContext: null,
-          pendingRevision: null,
-          activeResearchId: null,
-        });
-      });
-    },
+    getTree: () => get().config.tree,
   };
 });

@@ -41,10 +41,10 @@ import { normalizePastedHtmlForParagraphs } from "@/lib/plain-text-blocks";
 import { stripColorFromPastedSlice } from "@/lib/strip-pasted-color";
 
 type Props = {
+  /** Now a file path rather than a chapter UUID. */
   chapterId: string;
   initialContent: JSONContent;
   focusMode?: boolean;
-  /** Research notes use a separate store slice; chat/insert bridges are disabled. */
   surface?: "chapter" | "research";
 };
 
@@ -54,10 +54,10 @@ export function ManuscriptEditor({
   focusMode = false,
   surface = "chapter",
 }: Props) {
-  const updateChapterContent = useProjectStore((s) => s.updateChapterContent);
-  const updateResearchContent = useProjectStore((s) => s.updateResearchContent);
+  const updateActiveFileContent = useProjectStore(
+    (s) => s.updateActiveFileContent,
+  );
   const setEditorContext = useProjectStore((s) => s.setEditorContext);
-  const isResearch = surface === "research";
 
   const [inlineRequest, setInlineRequest] = useState<InlineAiRequest | null>(
     null,
@@ -101,11 +101,7 @@ export function ManuscriptEditor({
 
   const debouncedSave = useDebouncedCallback(
     (editor: Editor) => {
-      if (isResearch) {
-        updateResearchContent(chapterId, editor.getJSON());
-      } else {
-        updateChapterContent(chapterId, editor.getJSON());
-      }
+      updateActiveFileContent(editor.getJSON());
     },
     500,
   );
@@ -148,10 +144,9 @@ export function ManuscriptEditor({
             handleDOMEvents: {
               keydown: (_view, event) => handleCommandNavigation(event),
               mouseup: (view) => {
-                if (isResearch) return false;
                 const slice = getSelectionSliceFromState(view.state);
                 if (slice) {
-                  setEditorContext({ ...slice, chapterId });
+                  setEditorContext({ ...slice, filePath: chapterId });
                 } else if (view.hasFocus()) {
                   setEditorContext(null);
                 }
@@ -176,9 +171,8 @@ export function ManuscriptEditor({
             debouncedSave(editor);
           }}
           onFocus={({ editor }) => {
-            if (isResearch) return;
             const ctx = useProjectStore.getState().editorContext;
-            if (!ctx || ctx.chapterId !== chapterId) return;
+            if (!ctx || ctx.filePath !== chapterId) return;
             const docSize = editor.state.doc.content.size;
             const from = Math.max(0, Math.min(ctx.from, docSize));
             const to = Math.max(0, Math.min(ctx.to, docSize));
@@ -187,12 +181,11 @@ export function ManuscriptEditor({
             }
           }}
           onSelectionUpdate={({ editor }) => {
-            if (isResearch) return;
             const slice = getSelectionSlice(editor);
             if (slice) {
               setEditorContext({
                 text: slice.text,
-                chapterId,
+                filePath: chapterId,
                 from: slice.from,
                 to: slice.to,
               });
@@ -227,13 +220,9 @@ export function ManuscriptEditor({
             </EditorCommandList>
           </EditorCommand>
           <FormatAndAiBubble onInline={onInlineFromBubble} />
-          {!isResearch ? (
-            <>
-              <ContextHighlightBridge chapterId={chapterId} />
-              <RevisionReviewBridge chapterId={chapterId} />
-              <InsertFromChatBridge />
-            </>
-          ) : null}
+          <ContextHighlightBridge chapterId={chapterId} />
+          <RevisionReviewBridge chapterId={chapterId} />
+          <InsertFromChatBridge />
         </EditorContent>
       </EditorRoot>
       <InlineAiPanel

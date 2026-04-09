@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect } from "react";
-import { loadProjectIndex } from "@/lib/persistence";
+import { loadWorkspaceIndex } from "@/lib/workspace-fs";
 import { useProjectStore } from "@/store/project-store";
 
 /**
- * Loads the project index from IndexedDB for the home screen “recent” list.
+ * Loads the workspace index for the home screen "recent projects" list.
  */
 export function useWorkspaceBootstrap() {
   const setRecentProjectsFromIndex = useProjectStore(
@@ -16,7 +16,7 @@ export function useWorkspaceBootstrap() {
     let cancelled = false;
     void (async () => {
       try {
-        const entries = await loadProjectIndex();
+        const entries = await loadWorkspaceIndex();
         if (cancelled) return;
         setRecentProjectsFromIndex(entries);
       } catch {

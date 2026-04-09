@@ -8,13 +8,11 @@ import { LeftSidebar } from "@/components/sidebar/left-sidebar";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { ManuscriptEditor } from "@/components/editor/manuscript-editor";
 import { CommandPalette } from "@/components/command-palette";
-import { GenerateChaptersDialog } from "@/components/generate-chapters-dialog";
-import { DocumentExportMenu } from "@/components/document-export/document-export-menu";
-import { AppMenu } from "@/components/app-menu";
 import { ElectronTitleBar } from "@/components/electron-title-bar";
 import { HomeScreen } from "@/components/home-screen";
 import { useWorkspaceBootstrap } from "@/hooks/use-workspace-bootstrap";
 import { isElectronApp } from "@/lib/electron-bridge";
+import { isEditableFile } from "@/lib/markdown-serialize";
 import { useProjectStore } from "@/store/project-store";
 import { cn } from "@/lib/utils";
 
@@ -22,22 +20,21 @@ export function AppShell() {
   useWorkspaceBootstrap();
   const workspaceScreen = useProjectStore((s) => s.workspaceScreen);
   const goHome = useProjectStore((s) => s.goHome);
-  const project = useProjectStore((s) => s.project);
-  const activeChapterId = useProjectStore((s) => s.activeChapterId);
-  const chapters = useProjectStore((s) => s.chapters);
-  const activeResearchId = useProjectStore((s) => s.activeResearchId);
-  const researchDocuments = useProjectStore((s) => s.researchDocuments);
+  const config = useProjectStore((s) => s.config);
+  const openFiles = useProjectStore((s) => s.openFiles);
   const focusMode = useProjectStore((s) => s.focusMode);
   const setFocusMode = useProjectStore((s) => s.setFocusMode);
   const leftSidebarOpen = useProjectStore((s) => s.leftSidebarOpen);
   const rightSidebarOpen = useProjectStore((s) => s.rightSidebarOpen);
   const toggleLeftSidebar = useProjectStore((s) => s.toggleLeftSidebar);
   const toggleRightSidebar = useProjectStore((s) => s.toggleRightSidebar);
-  const setProjectField = useProjectStore((s) => s.setProjectField);
+  const setProjectTitle = useProjectStore((s) => s.setProjectTitle);
+  const updateActiveFileContent = useProjectStore((s) => s.updateActiveFileContent);
 
-  const isSingleDocument = project.editorLayout === "singleDocument";
-  const activeChapter = chapters.find((c) => c.id === activeChapterId);
-  const activeResearch = researchDocuments.find((d) => d.id === activeResearchId);
+  const activeFilePath = config.activeFilePath;
+  const activeFileEntry = activeFilePath ? openFiles.get(activeFilePath) : null;
+  const canEdit = activeFilePath ? isEditableFile(activeFilePath) : false;
+
   const focusModeRef = useRef(focusMode);
 
   useEffect(() => {
@@ -84,28 +81,6 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", onKey);
   }, [focusMode, setFocusMode]);
 
-  const [generateChaptersOpen, setGenerateChaptersOpen] = useState(false);
-  const [generateChaptersRange, setGenerateChaptersRange] = useState<
-    { start: number; end: number } | undefined
-  >();
-
-  useEffect(() => {
-    if (workspaceScreen !== "editor") return;
-    const h = (e: Event) => {
-      const ce = e as CustomEvent<{ start?: number; end?: number }>;
-      const d = ce.detail;
-      if (d?.start != null && d?.end != null) {
-        setGenerateChaptersRange({ start: d.start, end: d.end });
-      } else {
-        setGenerateChaptersRange(undefined);
-      }
-      setGenerateChaptersOpen(true);
-    };
-    window.addEventListener("ai-writer:generate-chapters", h);
-    return () =>
-      window.removeEventListener("ai-writer:generate-chapters", h);
-  }, [workspaceScreen]);
-
   if (workspaceScreen === "home") {
     return <HomeScreen />;
   }
@@ -115,7 +90,7 @@ export function AppShell() {
   return (
     <div className="flex h-dvh max-h-dvh flex-col overflow-hidden bg-background text-foreground">
       {electronUi && !focusMode ? (
-        <ElectronTitleBar title={project.title} />
+        <ElectronTitleBar title={config.project.title} />
       ) : null}
       {!focusMode && (
         <header
@@ -140,11 +115,11 @@ export function AppShell() {
               id="project-title"
               name="projectTitle"
               type="text"
-              value={project.title}
-              onChange={(e) => setProjectField({ title: e.target.value })}
+              value={config.project.title}
+              onChange={(e) => setProjectTitle(e.target.value)}
               onBlur={(e) => {
                 const t = e.target.value.trim();
-                if (t !== e.target.value) setProjectField({ title: t || "Untitled" });
+                if (t !== e.target.value) setProjectTitle(t || "Untitled");
               }}
               autoComplete="off"
               spellCheck={false}
@@ -153,11 +128,11 @@ export function AppShell() {
             />
           </div>
           <div className="ml-auto flex items-center gap-2">
-            {isSingleDocument ? <DocumentExportMenu /> : null}
-            {!electronUi ? <AppMenu /> : null}
-            <span className="hidden text-xs text-muted-foreground sm:inline">
-              ⌘K
-            </span>
+            {!electronUi && (
+              <span className="hidden text-xs text-muted-foreground sm:inline">
+                ⌘K
+              </span>
+            )}
             <Button
               type="button"
               variant="ghost"
@@ -167,18 +142,16 @@ export function AppShell() {
             >
               <Maximize2 className="h-4 w-4" />
             </Button>
-            {!isSingleDocument ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={cn(leftSidebarOpen && "bg-muted")}
-                title="Toggle manuscript"
-                onClick={() => toggleLeftSidebar()}
-              >
-                <List className="h-4 w-4" />
-              </Button>
-            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={cn(leftSidebarOpen && "bg-muted")}
+              title="Toggle file tree"
+              onClick={() => toggleLeftSidebar()}
+            >
+              <List className="h-4 w-4" />
+            </Button>
             <Button
               type="button"
               variant="ghost"
@@ -203,11 +176,11 @@ export function AppShell() {
               id="project-title-focus"
               name="projectTitle"
               type="text"
-              value={project.title}
-              onChange={(e) => setProjectField({ title: e.target.value })}
+              value={config.project.title}
+              onChange={(e) => setProjectTitle(e.target.value)}
               onBlur={(e) => {
                 const t = e.target.value.trim();
-                if (t !== e.target.value) setProjectField({ title: t || "Untitled" });
+                if (t !== e.target.value) setProjectTitle(t || "Untitled");
               }}
               autoComplete="off"
               spellCheck={false}
@@ -231,7 +204,7 @@ export function AppShell() {
 
       <div className="flex min-h-0 flex-1">
         <AnimatePresence initial={false}>
-          {!focusMode && leftSidebarOpen && !isSingleDocument && (
+          {!focusMode && leftSidebarOpen && (
             <motion.aside
               key="left"
               initial={{ width: 0, opacity: 0 }}
@@ -257,25 +230,25 @@ export function AppShell() {
               focusMode ? "min-h-dvh" : "min-h-full",
             )}
           >
-            {activeResearchId && activeResearch ? (
+            {activeFileEntry && canEdit ? (
               <ManuscriptEditor
-                key={`research-${activeResearch.id}`}
-                chapterId={activeResearch.id}
-                initialContent={activeResearch.content}
-                focusMode={focusMode}
-                surface="research"
-              />
-            ) : activeChapter ? (
-              <ManuscriptEditor
-                key={activeChapter.id}
-                chapterId={activeChapter.id}
-                initialContent={activeChapter.content}
+                key={activeFilePath}
+                chapterId={activeFilePath!}
+                initialContent={activeFileEntry.content}
                 focusMode={focusMode}
               />
+            ) : activeFilePath && !canEdit ? (
+              <div className="flex flex-1 items-center justify-center">
+                <p className="text-sm text-muted-foreground">
+                  Preview not available for this file type.
+                </p>
+              </div>
             ) : (
-              <p className="p-8 text-sm text-muted-foreground">
-                Select or create a chapter to begin.
-              </p>
+              <div className="flex flex-1 items-center justify-center">
+                <p className="text-sm text-muted-foreground">
+                  Select or create a file to begin writing.
+                </p>
+              </div>
             )}
           </div>
         </main>
@@ -299,14 +272,6 @@ export function AppShell() {
       </div>
 
       <CommandPalette />
-      <GenerateChaptersDialog
-        open={generateChaptersOpen}
-        onOpenChange={(o) => {
-          setGenerateChaptersOpen(o);
-          if (!o) setGenerateChaptersRange(undefined);
-        }}
-        initialRange={generateChaptersRange}
-      />
     </div>
   );
 }

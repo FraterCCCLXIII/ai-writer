@@ -60,7 +60,7 @@ export function RevisionReviewBridge({ chapterId }: { chapterId: string }) {
       setAnchor(null);
       return;
     }
-    if (pendingRevision.chapterId !== chapterId) return;
+    if (pendingRevision.filePath !== chapterId) return;
 
     const id = pendingRevision.assistantMessageId;
 
@@ -96,7 +96,7 @@ export function RevisionReviewBridge({ chapterId }: { chapterId: string }) {
   ]);
 
   useEffect(() => {
-    if (!pendingRevision || pendingRevision.chapterId !== chapterId) return;
+    if (!pendingRevision || pendingRevision.filePath !== chapterId) return;
     if (!editor || editor.isDestroyed) return;
     const onScrollOrResize = () => positionFromEditor();
     window.addEventListener("resize", onScrollOrResize);
@@ -122,7 +122,7 @@ export function RevisionReviewBridge({ chapterId }: { chapterId: string }) {
   if (
     typeof document === "undefined" ||
     !pendingRevision ||
-    pendingRevision.chapterId !== chapterId ||
+    pendingRevision.filePath !== chapterId ||
     !anchor
   ) {
     return null;

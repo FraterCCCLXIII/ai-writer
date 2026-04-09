@@ -2,21 +2,18 @@
 
 import { useEffect, useState } from "react";
 import {
-  BookPlus,
   Eye,
   EyeOff,
-  FileText,
+  FilePlus,
   FolderOpen,
   Home,
-  Library,
   MessageSquare,
   PanelLeft,
   PanelRight,
-  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { isElectronApp } from "@/lib/electron-bridge";
-import { WORKSPACE_FILE_NAME } from "@/lib/workspace-file";
+import { collectFiles } from "@/documents/workspace-types";
 import { Command } from "cmdk";
 import {
   Dialog,
@@ -26,17 +23,17 @@ import { useProjectStore } from "@/store/project-store";
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
-  const project = useProjectStore((s) => s.project);
-  const addChapter = useProjectStore((s) => s.addChapter);
-  const chapters = useProjectStore((s) => s.chapters);
-  const selectChapter = useProjectStore((s) => s.selectChapter);
+  const tree = useProjectStore((s) => s.config.tree);
+  const selectFile = useProjectStore((s) => s.selectFile);
+  const createFile = useProjectStore((s) => s.createFile);
   const toggleLeftSidebar = useProjectStore((s) => s.toggleLeftSidebar);
   const toggleRightSidebar = useProjectStore((s) => s.toggleRightSidebar);
   const setFocusMode = useProjectStore((s) => s.setFocusMode);
   const focusMode = useProjectStore((s) => s.focusMode);
   const goHome = useProjectStore((s) => s.goHome);
   const openFolderProject = useProjectStore((s) => s.openFolderProject);
-  const requestFileImport = useProjectStore((s) => s.requestFileImport);
+
+  const allFiles = collectFiles(tree);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -67,61 +64,32 @@ export function CommandPalette() {
               No results.
             </Command.Empty>
             <Command.Group
-              heading="Manuscript"
+              heading="Files"
               className="text-xs font-medium text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5"
             >
               <Command.Item
                 className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-muted"
                 onSelect={() => {
-                  addChapter();
+                  void createFile(null, "Untitled.md");
                   setOpen(false);
                 }}
               >
-                <BookPlus className="h-4 w-4" />
-                New chapter
+                <FilePlus className="h-4 w-4" />
+                New file
               </Command.Item>
-              {project.editorLayout !== "singleDocument" ? (
+              {allFiles.map((f) => (
                 <Command.Item
+                  key={f.id}
                   className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-muted"
                   onSelect={() => {
-                    window.dispatchEvent(
-                      new CustomEvent("ai-writer:generate-chapters"),
-                    );
+                    void selectFile(f.path);
                     setOpen(false);
                   }}
                 >
-                  <Library className="h-4 w-4" />
-                  Generate chapters from research…
-                </Command.Item>
-              ) : null}
-              {chapters.map((c) => (
-                <Command.Item
-                  key={c.id}
-                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-muted"
-                  onSelect={() => {
-                    selectChapter(c.id);
-                    setOpen(false);
-                  }}
-                >
-                  <Sparkles className="h-4 w-4 opacity-60" />
-                  Open: {c.title}
+                  <FilePlus className="h-4 w-4 opacity-60" />
+                  Open: {f.path}
                 </Command.Item>
               ))}
-            </Command.Group>
-            <Command.Group
-              heading="Documents"
-              className="mt-2 text-xs font-medium text-muted-foreground"
-            >
-              <Command.Item
-                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-muted"
-                onSelect={() => {
-                  requestFileImport();
-                  setOpen(false);
-                }}
-              >
-                <FileText className="h-4 w-4" />
-                Open file…
-              </Command.Item>
             </Command.Group>
             {isElectronApp() ? (
               <Command.Group
@@ -136,16 +104,11 @@ export function CommandPalette() {
                         await openFolderProject();
                         setOpen(false);
                       } catch (e) {
-                        if (
-                          e instanceof Error &&
-                          e.message === "INVALID_WORKSPACE_FILE"
-                        ) {
-                          toast.error(
-                            `That folder does not contain a valid ${WORKSPACE_FILE_NAME} file.`,
-                          );
-                        } else {
-                          toast.error("Could not open that folder.");
-                        }
+                        toast.error(
+                          e instanceof Error
+                            ? e.message
+                            : "Could not open that folder.",
+                        );
                       }
                     })();
                   }}
@@ -177,7 +140,7 @@ export function CommandPalette() {
                 }}
               >
                 <PanelLeft className="h-4 w-4" />
-                Toggle left sidebar
+                Toggle file tree
               </Command.Item>
               <Command.Item
                 className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-muted"
@@ -187,7 +150,7 @@ export function CommandPalette() {
                 }}
               >
                 <PanelRight className="h-4 w-4" />
-                Toggle right sidebar
+                Toggle assistant
               </Command.Item>
               <Command.Item
                 className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-muted"

@@ -12,7 +12,7 @@ function applyContextDecoration(
   editorContext: ReturnType<typeof useProjectStore.getState>["editorContext"],
 ) {
   const ctx =
-    editorContext?.chapterId === chapterId ? editorContext : null;
+    editorContext?.filePath === chapterId ? editorContext : null;
   const showPin = Boolean(ctx && !editor.isFocused);
   const tr = editor.state.tr.setMeta(
     contextHighlightPluginKey,

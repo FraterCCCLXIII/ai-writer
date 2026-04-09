@@ -115,9 +115,7 @@ export type ElectronTitleBarProps = {
  */
 export function ElectronTitleBar({ title = "Manuscript", className }: ElectronTitleBarProps) {
   const showExport = useProjectStore(
-    (s) =>
-      s.workspaceScreen === "editor" &&
-      s.project.editorLayout === "singleDocument",
+    (s) => s.workspaceScreen === "editor" && s.config.activeFilePath != null,
   );
   const [isMac, setIsMac] = useState(false);
   const [maximized, setMaximized] = useState(false);
