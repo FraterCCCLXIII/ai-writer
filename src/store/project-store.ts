@@ -15,6 +15,7 @@ import {
 } from "@/lib/persistence";
 import { paragraphDocFromPlainText } from "@/lib/plain-text-insert";
 import { parsePersistedWorkspace } from "@/lib/workspace-schema";
+import type { ChatMode, TodoItem, WriteMutation } from "@/lib/ai/types";
 
 const emptyDoc: JSONContent = {
   type: "doc",
@@ -176,6 +177,17 @@ type ProjectState = {
   requestFileImport: () => void;
   /** Import a non-workspace file as a single editable document. */
   openImportedFile: (file: File) => Promise<void>;
+
+  /** Active chat mode (Ask / Edit / Agent). Persisted with workspace. */
+  chatMode: ChatMode;
+  setChatMode: (mode: ChatMode) => void;
+
+  /** Agent session todos — session-only, not persisted. */
+  agentTodos: TodoItem[];
+  setAgentTodos: (todos: TodoItem[]) => void;
+
+  /** Apply write mutations produced by an agent run to the workspace. */
+  applyWriteMutations: (mutations: WriteMutation[]) => void;
 };
 
 export const useProjectStore = create<ProjectState>((set, get) => {
@@ -213,6 +225,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     pendingRevision: null,
     researchDocuments: [],
     activeResearchId: null,
+    chatMode: "ask" as ChatMode,
+    agentTodos: [],
 
     setProjectField: (patch) => {
       set((s) => ({ project: { ...s.project, ...patch } }));
@@ -683,6 +697,45 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 
     requestFileImport: () =>
       set((s) => ({ fileImportPickRequest: s.fileImportPickRequest + 1 })),
+
+    setChatMode: (mode) => set({ chatMode: mode }),
+
+    setAgentTodos: (todos) => set({ agentTodos: todos }),
+
+    applyWriteMutations: (mutations) => {
+      if (mutations.length === 0) return;
+      const s = get();
+      let updatedChapters = [...s.chapters];
+
+      for (const mutation of mutations) {
+        if (mutation.type === "edit_chapter") {
+          updatedChapters = updatedChapters.map((ch) =>
+            ch.id === mutation.chapterId
+              ? { ...ch, content: paragraphDocFromPlainText(mutation.newPlainText) }
+              : ch,
+          );
+        } else if (mutation.type === "create_chapter") {
+          const nextOrder =
+            updatedChapters.reduce((m, c) => Math.max(m, c.order), -1) + 1;
+          const id =
+            typeof crypto !== "undefined" && crypto.randomUUID
+              ? crypto.randomUUID()
+              : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          updatedChapters = [
+            ...updatedChapters,
+            {
+              id,
+              title: mutation.title,
+              content: paragraphDocFromPlainText(mutation.plainText),
+              order: nextOrder,
+            },
+          ];
+        }
+      }
+
+      set({ chapters: updatedChapters });
+      schedulePersist();
+    },
 
     openImportedFile: async (file: File) => {
       const { importFileToEditorContent } = await import(

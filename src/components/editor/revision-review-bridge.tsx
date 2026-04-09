@@ -20,6 +20,7 @@ export function RevisionReviewBridge({ chapterId }: { chapterId: string }) {
   const setPendingRevision = useProjectStore((s) => s.setPendingRevision);
 
   const appliedIdRef = useRef<string | null>(null);
+  const fromPosRef = useRef<number | null>(null);
   const [anchor, setAnchor] = useState<{
     top: number;
     left: number;
@@ -28,12 +29,19 @@ export function RevisionReviewBridge({ chapterId }: { chapterId: string }) {
   const positionFromEditor = useCallback(() => {
     if (!editor || editor.isDestroyed) return;
     try {
-      const pos = editor.state.selection.to;
-      const coords = editor.view.coordsAtPos(pos);
-      setAnchor({
-        top: coords.bottom + 8,
-        left: coords.left,
-      });
+      // Use the end of the replaced range for vertical position (bottom of last
+      // line) and the start of the range for horizontal position (left edge of
+      // the replacement block).
+      const endCoords = editor.view.coordsAtPos(editor.state.selection.to);
+      let left = endCoords.left;
+      if (fromPosRef.current !== null) {
+        try {
+          left = editor.view.coordsAtPos(fromPosRef.current).left;
+        } catch {
+          // fall back to end-position left
+        }
+      }
+      setAnchor({ top: endCoords.bottom + 8, left });
     } catch {
       setAnchor(null);
     }
@@ -42,6 +50,7 @@ export function RevisionReviewBridge({ chapterId }: { chapterId: string }) {
   useEffect(() => {
     if (!pendingRevision) {
       appliedIdRef.current = null;
+      fromPosRef.current = null;
       setAnchor(null);
     }
   }, [pendingRevision]);
@@ -70,6 +79,7 @@ export function RevisionReviewBridge({ chapterId }: { chapterId: string }) {
           .insertContent(plainTextToInsertContent(replacementText))
           .run();
         appliedIdRef.current = id;
+        fromPosRef.current = from;
       } catch {
         setPendingRevision(null);
         return;

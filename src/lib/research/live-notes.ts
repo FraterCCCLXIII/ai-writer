@@ -30,7 +30,7 @@ export type ComputeLiveNotesOptions = {
   excludeResearchIds?: Set<string> | string[];
 };
 
-function tokenize(text: string): string[] {
+export function tokenize(text: string): string[] {
   const m = text.toLowerCase().match(/[a-z0-9']+/g);
   return m ?? [];
 }
@@ -43,7 +43,7 @@ function wordCounts(tokens: string[]): Map<string, number> {
   return m;
 }
 
-function buildIdf(chunkTokenLists: string[][]): Map<string, number> {
+export function buildIdfFromChunks(chunkTokenLists: string[][]): Map<string, number> {
   const N = chunkTokenLists.length;
   const df = new Map<string, number>();
   for (const tokens of chunkTokenLists) {
@@ -59,7 +59,7 @@ function buildIdf(chunkTokenLists: string[][]): Map<string, number> {
   return idf;
 }
 
-function tfidfVector(
+export function tfidfVectorFromChunks(
   tokens: string[],
   idf: Map<string, number>,
 ): Map<string, number> {
@@ -74,7 +74,7 @@ function tfidfVector(
   return out;
 }
 
-function cosineSimilarity(
+export function cosineSimilarityVectors(
   a: Map<string, number>,
   b: Map<string, number>,
 ): number {
@@ -237,12 +237,12 @@ export function computeLiveNotes(
 
   if (chunkMetas.length === 0) return [];
 
-  const idf = buildIdf(chunkMetas.map((c) => c.tokens));
-  const anchorVec = tfidfVector(anchorTokens, idf);
+  const idf = buildIdfFromChunks(chunkMetas.map((c) => c.tokens));
+  const anchorVec = tfidfVectorFromChunks(anchorTokens, idf);
 
   const scored: LiveNoteHit[] = chunkMetas.map((c) => {
-    const chunkVec = tfidfVector(c.tokens, idf);
-    const score = cosineSimilarity(anchorVec, chunkVec);
+    const chunkVec = tfidfVectorFromChunks(c.tokens, idf);
+    const score = cosineSimilarityVectors(anchorVec, chunkVec);
     return {
       documentId: c.documentId,
       title: c.title,

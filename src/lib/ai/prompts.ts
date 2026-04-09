@@ -1,4 +1,40 @@
-import type { ChatContext, InlineAction } from "./types";
+import type { ChatContext, ChatMode, InlineAction } from "./types";
+
+const PREAMBLE_RE =
+  /^(sure[,!]?|here(?:'s| is)(?: a| the)?|certainly[,!]?|of course[,!]?|absolutely[,!]?|great[,!]?|happy to[,!]?).*/i;
+
+const POSTAMBLE_RE =
+  /^(feel free to|let me know|hope (this|that)|if you('d| would)|don't hesitate|i hope|please (let|feel)|reach out).*/i;
+
+const HR_RE = /^-{3,}$|^\*{3,}$|^_{3,}$/;
+
+/**
+ * Strip conversational preamble/postamble and markdown horizontal rules from a
+ * chat AI response before it is used as replacement prose in the editor.
+ */
+export function stripRevisionArtifacts(text: string): string {
+  const lines = text.split("\n");
+
+  let start = 0;
+  let end = lines.length - 1;
+
+  // Drop leading blank lines and a single preamble sentence
+  while (start <= end && lines[start].trim() === "") start++;
+  if (start <= end && PREAMBLE_RE.test(lines[start].trim())) start++;
+  while (start <= end && lines[start].trim() === "") start++;
+
+  // Drop trailing blank lines and a single postamble sentence
+  while (end >= start && lines[end].trim() === "") end--;
+  if (end >= start && POSTAMBLE_RE.test(lines[end].trim())) end--;
+  while (end >= start && lines[end].trim() === "") end--;
+
+  // Remove markdown horizontal rules anywhere in the remaining lines
+  const cleaned = lines
+    .slice(start, end + 1)
+    .filter((line) => !HR_RE.test(line.trim()));
+
+  return cleaned.join("\n").trim();
+}
 
 export function generateChaptersFromResearchSystemPrompt(): string {
   return `You are a skilled long-form writer helping an author draft manuscript chapters using their research notes.
@@ -68,7 +104,56 @@ export function inlineUserPayload(input: {
 }
 
 export function chatSystemPrompt(): string {
-  return `You are a thoughtful writing partner for long-form manuscripts. Be concise unless asked for detail. When generating new prose, match the user's likely voice from context. Prefer practical, craft-focused feedback.`;
+  return `You are a thoughtful writing partner for long-form manuscripts. Be concise unless asked for detail. When generating new prose, match the user's likely voice from context. Prefer practical, craft-focused feedback.
+
+When the author asks you to rewrite, revise, edit, replace, improve, or transform a selected passage:
+- Output ONLY the revised prose text. Nothing else.
+- No preamble (do not start with "Sure!", "Here is", "Here's", "Certainly", "Of course", or any other lead-in phrase).
+- No postamble (do not add "Feel free to...", "Let me know if...", or any closing remark).
+- No markdown fences, no horizontal rules (---), no quotation marks wrapping the text.
+- If the author is asking a question about the selection or requesting feedback only, respond conversationally as normal.`;
+}
+
+/**
+ * System prompt for the agent route — varies by mode.
+ */
+export function agentSystemPrompt(mode: ChatMode): string {
+  if (mode === "ask") {
+    return `You are a thoughtful writing partner for long-form manuscripts. Your role is to discuss, brainstorm, and answer questions about the work — you do NOT edit the document directly.
+
+Guidelines:
+- Be concise unless the author asks for depth.
+- Reference specific passages when discussing the text.
+- Offer craft-focused, practical feedback.
+- When you lack context, use the available tools to read chapters or research before answering.`;
+  }
+
+  if (mode === "edit") {
+    return `You are a skilled manuscript editor. Your role is to make targeted, precise edits to the author's work.
+
+Guidelines:
+- Always read the relevant chapter first before editing it.
+- Make the minimum changes needed to fulfill the request — preserve the author's voice.
+- Explain what you changed and why in 1–2 sentences after editing.
+- Use edit_chapter for changes to existing chapters; use create_chapter for new ones.
+- Do not rewrite entire chapters unless explicitly asked.`;
+  }
+
+  // agent mode
+  return `You are an autonomous writing assistant for long-form manuscripts. You can read, create, and edit chapters, search research, and track your own task list.
+
+Workflow:
+1. Start every multi-step task by calling manage_todo_list to outline your plan.
+2. Use list_chapters to understand the manuscript structure before reading or editing.
+3. Use search_research or read_research to ground your writing in the author's notes.
+4. Use edit_chapter or create_chapter to apply changes — never describe changes without applying them.
+5. Update todos as you complete each step.
+6. When done, give a brief summary of what you accomplished.
+
+Guidelines:
+- Preserve the author's voice; do not impose a different style.
+- Make changes incrementally — read first, then edit.
+- If a task is ambiguous, ask one clarifying question before proceeding.`;
 }
 
 export function chatUserPayload(input: {
@@ -93,7 +178,7 @@ export function chatUserPayload(input: {
   const header = [
     context.chapterTitle ? `Current chapter: ${context.chapterTitle}` : null,
     sel
-      ? `## Primary focus — user's selected excerpt (revise or respond in relation to this)\n"""${sel}"""\n\nThe author selected the passage above in the manuscript. Prioritize it in your answer.`
+      ? `## Primary focus — user's selected excerpt\n"""${sel}"""\n\nThe author selected the passage above in the manuscript. If their message asks you to revise or rewrite it, output ONLY the replacement prose — no lead-in phrases, no closing remarks, no markdown separators.`
       : null,
     context.chapterPlainText
       ? `## Full chapter text (may be truncated for length)\n"""${context.chapterPlainText.slice(0, 80_000)}"""`

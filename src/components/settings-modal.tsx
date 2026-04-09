@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 import {
   loadAiSettings,
   saveAiSettings,
@@ -20,6 +21,12 @@ type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 };
+
+const MODE_LABELS: { key: "ask" | "edit" | "agent"; label: string; hint: string }[] = [
+  { key: "ask", label: "Ask", hint: "Conversational / brainstorming (fast model recommended)" },
+  { key: "edit", label: "Edit", hint: "Targeted edits to chapters (balanced model)" },
+  { key: "agent", label: "Agent", hint: "Autonomous multi-step tasks (most capable model)" },
+];
 
 export function SettingsModal({ open, onOpenChange }: Props) {
   const [draft, setDraft] = useState<AiSettings>(() => loadAiSettings());
@@ -82,7 +89,7 @@ export function SettingsModal({ open, onOpenChange }: Props) {
           </div>
           <div className="grid gap-2">
             <label htmlFor="settings-model" className="text-sm font-medium">
-              Model
+              Default model
             </label>
             <Input
               id="settings-model"
@@ -94,8 +101,43 @@ export function SettingsModal({ open, onOpenChange }: Props) {
               }
             />
             <p className="text-xs text-muted-foreground">
-              Omit to use the server default model.
+              Used for all modes unless overridden below.
             </p>
+          </div>
+
+          <Separator />
+
+          <div className="grid gap-3">
+            <p className="text-sm font-medium">Per-mode model overrides</p>
+            <p className="text-xs text-muted-foreground -mt-1">
+              Leave blank to use the default model above.
+            </p>
+            {MODE_LABELS.map(({ key, label, hint }) => (
+              <div key={key} className="grid gap-1.5">
+                <label
+                  htmlFor={`settings-model-${key}`}
+                  className="text-sm font-medium"
+                >
+                  {label}
+                </label>
+                <Input
+                  id={`settings-model-${key}`}
+                  autoComplete="off"
+                  placeholder={draft.openaiModel || "gpt-4o-mini"}
+                  value={draft.modes[key].model}
+                  onChange={(e) =>
+                    setDraft((d) => ({
+                      ...d,
+                      modes: {
+                        ...d.modes,
+                        [key]: { model: e.target.value },
+                      },
+                    }))
+                  }
+                />
+                <p className="text-xs text-muted-foreground">{hint}</p>
+              </div>
+            ))}
           </div>
         </div>
         <div className="flex justify-end gap-2 pt-2">

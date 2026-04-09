@@ -7,6 +7,23 @@ export type InlineAction =
   | "tone_casual"
   | "tone_dramatic";
 
+export type ChatMode = "ask" | "edit" | "agent";
+
+export type AgentWorkspaceSnapshot = {
+  chapters: { id: string; title: string; order: number; plainText: string }[];
+  researchDocuments: { id: string; title: string; plainText: string }[];
+};
+
+export type WriteMutation =
+  | { type: "edit_chapter"; chapterId: string; newPlainText: string }
+  | { type: "create_chapter"; title: string; plainText: string };
+
+export type TodoItem = {
+  id: string;
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+};
+
 /** Response shape for research-driven chapter generation (JSON mode). */
 export type GenerateChaptersFromResearchResult = {
   chapters: { index: number; plainText: string }[];
