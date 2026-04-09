@@ -124,16 +124,14 @@ export function HomeScreen() {
               <PenLine className="h-3.5 w-3.5 shrink-0" />
               New project
             </button>
-            {isElectronApp() ? (
-              <button
-                type="button"
-                onClick={onOpenFolder}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                <FolderOpen className="h-3.5 w-3.5 shrink-0" />
-                Open folder…
-              </button>
-            ) : null}
+            <button
+              type="button"
+              onClick={isElectronApp() ? onOpenFolder : () => setHomeTab("all")}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <FolderOpen className="h-3.5 w-3.5 shrink-0" />
+              {isElectronApp() ? "Open folder…" : "Open project…"}
+            </button>
           </nav>
           <p className="mt-auto px-2 pt-8 text-[11px] leading-relaxed text-muted-foreground">
             {isElectronApp()
@@ -168,14 +166,23 @@ export function HomeScreen() {
                       onClick={() => startNewProject()}
                     >
                       <PenLine className="h-4 w-4" />
-                      {isElectronApp() ? "Choose folder…" : "New project"}
+                      {isElectronApp() ? "New project…" : "New project"}
                     </Button>
-                    {isElectronApp() && (
-                      <span className="text-xs text-muted-foreground">
-                        Pick an empty folder or an existing project
-                      </span>
-                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="gap-2"
+                      onClick={isElectronApp() ? onOpenFolder : () => setHomeTab("all")}
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                      {isElectronApp() ? "Open folder…" : "Open project…"}
+                    </Button>
                   </div>
+                  {isElectronApp() && (
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      Pick an empty folder to start fresh, or open one with an existing project.
+                    </p>
+                  )}
                 </div>
               </div>
 
