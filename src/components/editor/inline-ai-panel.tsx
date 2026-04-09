@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import type { InlineAction } from "@/lib/ai/types";
-import { plainTextToInsertContent } from "@/lib/plain-text-insert";
+import { markdownToTiptapNodes } from "@/lib/ai/markdown-to-tiptap";
 import { getAiOverridesForRequest } from "@/lib/ai-settings";
 
 export type InlineAiRequest = {
@@ -117,7 +117,7 @@ export function InlineAiPanel({
       .chain()
       .focus()
       .deleteRange({ from: request.from, to: request.to })
-      .insertContent(plainTextToInsertContent(text))
+      .insertContent(markdownToTiptapNodes(text))
       .run();
     onClear();
   };

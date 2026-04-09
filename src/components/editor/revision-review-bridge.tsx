@@ -7,7 +7,7 @@ import { useEditor } from "novel";
 import { Button } from "@/components/ui/button";
 import { useProjectStore } from "@/store/project-store";
 import { cn } from "@/lib/utils";
-import { plainTextToInsertContent } from "@/lib/plain-text-insert";
+import { markdownToTiptapNodes } from "@/lib/ai/markdown-to-tiptap";
 import { getScrollableAncestor } from "@/lib/scroll-parent";
 
 /**
@@ -76,7 +76,7 @@ export function RevisionReviewBridge({ chapterId }: { chapterId: string }) {
           .chain()
           .focus()
           .setTextSelection({ from, to })
-          .insertContent(plainTextToInsertContent(replacementText))
+          .insertContent(markdownToTiptapNodes(replacementText))
           .run();
         appliedIdRef.current = id;
         fromPosRef.current = from;

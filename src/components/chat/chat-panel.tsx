@@ -38,6 +38,8 @@ import { AgentTodos } from "@/components/chat/agent-todos";
 import { runAgentTurn } from "@/lib/ai/agent-loop";
 import { getModeNudge } from "@/lib/ai/intent-classifier";
 import type { AgentWorkspaceSnapshot, ChatMode } from "@/lib/ai/types";
+import { stripRevisionArtifacts } from "@/lib/ai/prompts";
+import { ChatMarkdown } from "@/components/chat/chat-markdown";
 
 function selectionPreview(text: string, max = 72) {
   const t = text.replace(/\s+/g, " ").trim();
@@ -275,13 +277,16 @@ export function ChatPanel() {
         trimmed &&
         !trimmed.startsWith("[Error]")
       ) {
-        setPendingRevision({
-          chapterId: ctxAtSend.chapterId,
-          from: ctxAtSend.from,
-          to: ctxAtSend.to,
-          replacementText: trimmed,
-          assistantMessageId: assistant.id,
-        });
+        const replacementText = stripRevisionArtifacts(trimmed);
+        if (replacementText) {
+          setPendingRevision({
+            chapterId: ctxAtSend.chapterId,
+            from: ctxAtSend.from,
+            to: ctxAtSend.to,
+            replacementText,
+            assistantMessageId: assistant.id,
+          });
+        }
       }
       flushWorkspace();
     } catch (e) {
@@ -494,15 +499,21 @@ export function ChatPanel() {
 
                   return (
                     <div key={m.id} className="space-y-1.5">
-                      <div
-                        className={
-                          m.role === "user"
-                            ? "ml-6 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm"
-                            : "mr-2 whitespace-pre-wrap rounded-lg border border-border px-3 py-2 text-sm"
-                        }
-                      >
-                        {display || (streamingWaiting ? "…" : "")}
-                      </div>
+                      {m.role === "user" ? (
+                        <div className="ml-6 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
+                          {display}
+                        </div>
+                      ) : (
+                        <div className="mr-2 rounded-lg border border-border px-3 py-2 text-sm">
+                          {display || streamingWaiting ? (
+                            display ? (
+                              <ChatMarkdown content={display} />
+                            ) : (
+                              <span className="text-muted-foreground">…</span>
+                            )
+                          ) : null}
+                        </div>
+                      )}
                       {canUseAssistantTools && (
                         <div className="mr-2 flex flex-wrap items-center justify-end gap-1">
                           <Button

@@ -1,19 +1,12 @@
 "use client";
 
 import { useEffect } from "react";
-import { useEditor, type JSONContent } from "novel";
+import { useEditor } from "novel";
 import {
   INSERT_EDITOR_EVENT,
   type InsertEditorDetail,
 } from "@/lib/editor-insert-events";
-import { splitPlainTextBlocks } from "@/lib/plain-text-blocks";
-
-function plainBlocksToParagraphs(blocks: string[]): JSONContent[] {
-  return blocks.map((block) => ({
-    type: "paragraph",
-    content: block ? [{ type: "text", text: block, marks: [] }] : [],
-  }));
-}
+import { markdownToTiptapNodes } from "@/lib/ai/markdown-to-tiptap";
 
 /**
  * Listens for chat panel actions and inserts text into the active TipTap editor.
@@ -30,19 +23,16 @@ export function InsertFromChatBridge() {
       const text = detail.text.trim();
       if (!text) return;
 
-      const blocks = splitPlainTextBlocks(text);
-      if (!blocks.length) return;
-
-      const paragraphs = plainBlocksToParagraphs(blocks);
+      const nodes = markdownToTiptapNodes(text);
 
       editor.chain().focus();
 
       if (detail.mode === "replace" && !editor.state.selection.empty) {
-        editor.chain().deleteSelection().insertContent(paragraphs).run();
+        editor.chain().deleteSelection().insertContent(nodes).run();
         return;
       }
 
-      editor.chain().insertContent(paragraphs).run();
+      editor.chain().insertContent(nodes).run();
     };
 
     window.addEventListener(
