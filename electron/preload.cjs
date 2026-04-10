@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   readTextFile: (filePath) => ipcRenderer.invoke("fs:read-text-file", filePath),
   writeTextFile: (filePath, contents) =>
     ipcRenderer.invoke("fs:write-text-file", filePath, contents),
+  writeBinaryFile: (filePath, buffer) =>
+    ipcRenderer.invoke("fs:write-binary-file", filePath, buffer),
   createDir: (dirPath) => ipcRenderer.invoke("fs:create-dir", dirPath),
   deletePath: (targetPath) => ipcRenderer.invoke("fs:delete-path", targetPath),
   renamePath: (oldPath, newPath) =>

@@ -19,6 +19,7 @@ export type ElectronAPI = {
   readDir: (dirPath: string) => Promise<FsDirEntry[]>;
   readTextFile: (filePath: string) => Promise<string | null>;
   writeTextFile: (filePath: string, contents: string) => Promise<void>;
+  writeBinaryFile: (filePath: string, buffer: Uint8Array) => Promise<void>;
   createDir: (dirPath: string) => Promise<void>;
   deletePath: (targetPath: string) => Promise<void>;
   renamePath: (oldPath: string, newPath: string) => Promise<void>;

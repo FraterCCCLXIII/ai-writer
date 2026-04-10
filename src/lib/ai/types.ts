@@ -12,11 +12,20 @@ export type ChatMode = "ask" | "edit" | "agent";
 export type AgentWorkspaceSnapshot = {
   chapters: { id: string; title: string; order: number; plainText: string }[];
   researchDocuments: { id: string; title: string; plainText: string }[];
+  /** Serialized folder tree so the AI knows the workspace structure. */
+  folderTree?: string;
 };
 
 export type WriteMutation =
   | { type: "edit_chapter"; chapterId: string; newPlainText: string }
-  | { type: "create_chapter"; title: string; plainText: string };
+  | { type: "create_chapter"; title: string; plainText: string }
+  | { type: "create_folder"; parentPath: string | null; name: string }
+  | {
+      type: "create_file";
+      parentPath: string | null;
+      name: string;
+      content: string;
+    };
 
 export type TodoItem = {
   id: string;

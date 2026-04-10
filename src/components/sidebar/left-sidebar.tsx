@@ -10,6 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { FILE_PICKER_ACCEPT_ALL } from "@/lib/document-import/document-import-constants";
 import { useProjectStore } from "@/store/project-store";
 import {
   FileTreeNode,
@@ -25,6 +26,7 @@ export function LeftSidebar() {
   const selectFile = useProjectStore((s) => s.selectFile);
   const createFile = useProjectStore((s) => s.createFile);
   const createFolder = useProjectStore((s) => s.createFolder);
+  const importFileIntoFolder = useProjectStore((s) => s.importFileIntoFolder);
   const renameNode = useProjectStore((s) => s.renameNode);
   const deleteNode = useProjectStore((s) => s.deleteNode);
   const moveNode = useProjectStore((s) => s.moveNode);
@@ -36,6 +38,8 @@ export function LeftSidebar() {
   const newNodeInputRef = useRef<HTMLInputElement>(null);
 
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const importTargetRef = useRef<string | null>(null);
 
   const startNewNode = (mode: "file" | "folder") => {
     setNewNodeMode(mode);
@@ -94,8 +98,42 @@ export function LeftSidebar() {
     setDragState(null);
   }, []);
 
+  const handleAddFileInFolder = useCallback(
+    (parentPath: string, name: string) => {
+      void createFile(parentPath, name);
+    },
+    [createFile],
+  );
+
+  const handleImportFile = useCallback((parentPath: string) => {
+    importTargetRef.current = parentPath;
+    importInputRef.current?.click();
+  }, []);
+
+  const handleImportInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      e.target.value = "";
+      if (!files || files.length === 0) return;
+      const parentPath = importTargetRef.current;
+      for (let i = 0; i < files.length; i++) {
+        void importFileIntoFolder(parentPath, files[i]);
+      }
+      importTargetRef.current = null;
+    },
+    [importFileIntoFolder],
+  );
+
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden bg-background">
+      <input
+        ref={importInputRef}
+        type="file"
+        className="hidden"
+        accept={FILE_PICKER_ACCEPT_ALL}
+        multiple
+        onChange={handleImportInputChange}
+      />
       <div className="flex min-w-0 items-center justify-between px-4 py-3">
         <span className="truncate text-xs font-medium uppercase tracking-wide text-muted-foreground">
           {projectTitle || "Workspace"}
@@ -140,6 +178,8 @@ export function LeftSidebar() {
                 void renameNode(oldPath, newName)
               }
               onDelete={(path) => void deleteNode(path)}
+              onAddFile={handleAddFileInFolder}
+              onImportFile={handleImportFile}
               onDragStart={handleDragStart}
               onDragOver={handleDragOver}
               onDrop={handleDrop}

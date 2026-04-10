@@ -29,7 +29,7 @@ interface WorkspaceFsDB extends DBSchema {
   [CONFIG_STORE]: { key: string; value: WorkspaceConfig };
   [FILES_STORE]: {
     key: string;
-    value: { workspaceId: string; path: string; content: string };
+    value: { workspaceId: string; path: string; content: string | Blob };
   };
   [INDEX_STORE]: { key: string; value: WorkspaceIndexEntry };
   [HANDLES_STORE]: { key: string; value: FileSystemDirectoryHandle };
@@ -176,6 +176,18 @@ async function writeFileViaHandle(
   if (!fh) throw new Error(`Cannot create file: ${relativePath}`);
   const writable = await fh.createWritable();
   await writable.write(content);
+  await writable.close();
+}
+
+async function writeBinaryViaHandle(
+  root: FileSystemDirectoryHandle,
+  relativePath: string,
+  data: ArrayBuffer,
+): Promise<void> {
+  const fh = await getNestedFileHandle(root, relativePath, true);
+  if (!fh) throw new Error(`Cannot create file: ${relativePath}`);
+  const writable = await fh.createWritable();
+  await writable.write(data);
   await writable.close();
 }
 
@@ -398,7 +410,9 @@ export async function readWorkspaceFile(
     FILES_STORE,
     idbFileKey(folderPathOrId, relativePath),
   );
-  return record?.content ?? null;
+  if (!record) return null;
+  if (typeof record.content === "string") return record.content;
+  return record.content.text();
 }
 
 /**
@@ -438,6 +452,35 @@ export async function createWorkspaceFile(
   initialContent: string = "",
 ): Promise<void> {
   await writeWorkspaceFile(folderPathOrId, relativePath, initialContent);
+}
+
+/**
+ * Write a binary file (images, PDFs, etc.) into the workspace.
+ */
+export async function writeWorkspaceBinaryFile(
+  folderPathOrId: string,
+  relativePath: string,
+  data: ArrayBuffer,
+): Promise<void> {
+  if (isElectron() && window.electronAPI) {
+    const fullPath = `${folderPathOrId}/${relativePath}`;
+    await window.electronAPI.writeBinaryFile(fullPath, new Uint8Array(data));
+    return;
+  }
+
+  const handle = await resolveHandle(folderPathOrId);
+  if (handle) {
+    await writeBinaryViaHandle(handle, relativePath, data);
+    return;
+  }
+
+  const db = await getDb();
+  const blob = new Blob([data]);
+  await db.put(
+    FILES_STORE,
+    { workspaceId: folderPathOrId, path: relativePath, content: blob },
+    idbFileKey(folderPathOrId, relativePath),
+  );
 }
 
 /**

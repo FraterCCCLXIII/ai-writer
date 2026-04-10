@@ -5,11 +5,14 @@ import {
   ChevronRight,
   EllipsisVertical,
   File,
+  FilePlus,
   FileText,
+  FileUp,
   Folder,
   FolderOpen,
   ImageIcon,
   FileCode,
+  Plus,
   Trash2,
   Pencil,
 } from "lucide-react";
@@ -87,6 +90,8 @@ export function FileTreeNode({
   onToggleFolder,
   onRename,
   onDelete,
+  onAddFile,
+  onImportFile,
   onDragStart,
   onDragOver,
   onDrop,
@@ -100,13 +105,18 @@ export function FileTreeNode({
   onToggleFolder: (path: string) => void;
   onRename: (oldPath: string, newName: string) => void;
   onDelete: (path: string) => void;
+  onAddFile: (parentPath: string, name: string) => void;
+  onImportFile: (parentPath: string) => void;
   onDragStart: (path: string) => void;
   onDragOver: (path: string, position: DropPosition) => void;
   onDrop: () => void;
   onDragEnd: () => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const [addingChild, setAddingChild] = useState(false);
+  const [newChildName, setNewChildName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const newChildInputRef = useRef<HTMLInputElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
 
   const isActive = node.kind === "file" && node.path === activeFilePath;
@@ -140,6 +150,22 @@ export function FileTreeNode({
     },
     [node.name, node.path, onRename],
   );
+
+  const handleStartAddChild = useCallback(() => {
+    setAddingChild(true);
+    setNewChildName("");
+    setTimeout(() => newChildInputRef.current?.focus(), 10);
+  }, []);
+
+  const handleCommitAddChild = useCallback(() => {
+    const name = newChildName.trim();
+    setAddingChild(false);
+    setNewChildName("");
+    if (name) {
+      const finalName = !name.includes(".") ? `${name}.md` : name;
+      onAddFile(node.path, finalName);
+    }
+  }, [newChildName, node.path, onAddFile]);
 
   const handleDragStart = useCallback(
     (e: React.DragEvent) => {
@@ -279,6 +305,41 @@ export function FileTreeNode({
           </button>
         )}
 
+        {isFolder && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100 data-[state=open]:opacity-100"
+                onClick={(e) => e.stopPropagation()}
+                aria-label="Add to folder"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" side="right" className="w-44">
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleStartAddChild();
+                }}
+              >
+                <FilePlus className="mr-2 h-3.5 w-3.5" />
+                New file
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onImportFile(node.path);
+                }}
+              >
+                <FileUp className="mr-2 h-3.5 w-3.5" />
+                Import file…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -313,7 +374,7 @@ export function FileTreeNode({
         </DropdownMenu>
       </div>
 
-      {isFolder && isExpanded && node.children.length > 0 && (
+      {isFolder && isExpanded && (
         <div>
           {node.children.map((child) => (
             <FileTreeNode
@@ -326,12 +387,39 @@ export function FileTreeNode({
               onToggleFolder={onToggleFolder}
               onRename={onRename}
               onDelete={onDelete}
+              onAddFile={onAddFile}
+              onImportFile={onImportFile}
               onDragStart={onDragStart}
               onDragOver={onDragOver}
               onDrop={onDrop}
               onDragEnd={onDragEnd}
             />
           ))}
+
+          {addingChild && (
+            <div
+              className="flex items-center gap-1 py-0.5"
+              style={{ paddingLeft: `${(depth + 1) * 16 + 4}px` }}
+            >
+              <FilePlus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <Input
+                ref={newChildInputRef}
+                value={newChildName}
+                onChange={(e) => setNewChildName(e.target.value)}
+                placeholder="filename"
+                className="h-7 flex-1 text-sm"
+                onBlur={handleCommitAddChild}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleCommitAddChild();
+                  if (e.key === "Escape") {
+                    setAddingChild(false);
+                    setNewChildName("");
+                  }
+                }}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          )}
         </div>
       )}
     </>

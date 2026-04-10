@@ -55,7 +55,7 @@ export async function POST(req: Request) {
     todos: [] as TodoItem[],
   };
 
-  const tools = buildWritingTools(state);
+  const tools = buildWritingTools(state, mode);
 
   const provider = createOpenAICompatible({
     name: "custom",

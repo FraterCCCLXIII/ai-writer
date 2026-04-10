@@ -1,6 +1,11 @@
 import { tool } from "ai";
 import { z } from "zod";
-import type { AgentWorkspaceSnapshot, TodoItem, WriteMutation } from "./types";
+import type {
+  AgentWorkspaceSnapshot,
+  ChatMode,
+  TodoItem,
+  WriteMutation,
+} from "./types";
 import {
   splitResearchIntoChunks,
   buildIdfFromChunks,
@@ -45,11 +50,17 @@ function findChapter(
  * Build all writing tools bound to a shared session state object.
  * The route handler passes the state in and reads mutations/todos back after streaming.
  *
+ * In "ask" mode only read-only tools are provided; write tools (edit, create,
+ * folder/file management) are excluded so the AI cannot modify the workspace.
+ *
  * Note: AI SDK v6 uses `inputSchema` (not `parameters`) and `execute` takes
  * `(input, options)` rather than destructured args.
  */
-export function buildWritingTools(state: AgentSessionState) {
-  return {
+export function buildWritingTools(
+  state: AgentSessionState,
+  mode: ChatMode = "agent",
+) {
+  const readOnlyTools = {
     list_chapters: tool({
       description:
         "List all chapters in the manuscript with their titles and order. Call this before reading or editing to know what chapters exist.",
@@ -91,71 +102,6 @@ export function buildWritingTools(state: AgentSessionState) {
         const preview = ch.plainText.trim();
         if (!preview) return `Chapter "${ch.title}" is empty.`;
         return `## Chapter: "${ch.title}"\n\n${preview}`;
-      },
-    }),
-
-    edit_chapter: tool({
-      description:
-        "Replace the content of a chapter with new text. The change is staged and applied after the agent run completes. Provide either chapterTitle or chapterIndex plus the new plain-text content.",
-      inputSchema: z.object({
-        chapterTitle: z
-          .string()
-          .optional()
-          .describe("Exact chapter title to edit"),
-        chapterIndex: z
-          .number()
-          .int()
-          .positive()
-          .optional()
-          .describe("1-based chapter index to edit"),
-        newContent: z
-          .string()
-          .describe(
-            "The new chapter text as plain text paragraphs separated by blank lines.",
-          ),
-      }),
-      execute: async (input) => {
-        const ch = findChapter(
-          state.snapshot,
-          input.chapterTitle,
-          input.chapterIndex,
-        );
-        if (!ch)
-          return `Chapter not found. Use list_chapters to see available chapters.`;
-        state.mutations.push({
-          type: "edit_chapter",
-          chapterId: ch.id,
-          newPlainText: input.newContent,
-        });
-        ch.plainText = input.newContent;
-        return `Chapter "${ch.title}" has been updated.`;
-      },
-    }),
-
-    create_chapter: tool({
-      description:
-        "Create a new chapter at the end of the manuscript. Returns the new chapter title.",
-      inputSchema: z.object({
-        title: z.string().describe("Title for the new chapter"),
-        content: z
-          .string()
-          .optional()
-          .default("")
-          .describe("Initial plain-text content for the chapter"),
-      }),
-      execute: async (input) => {
-        state.mutations.push({
-          type: "create_chapter",
-          title: input.title,
-          plainText: input.content,
-        });
-        state.snapshot.chapters.push({
-          id: `new-${Date.now()}`,
-          title: input.title,
-          order: state.snapshot.chapters.length,
-          plainText: input.content,
-        });
-        return `Chapter "${input.title}" has been created.`;
       },
     }),
 
@@ -242,6 +188,149 @@ export function buildWritingTools(state: AgentSessionState) {
       },
     }),
 
+    list_workspace_tree: tool({
+      description:
+        "Show the full workspace folder and file structure as an indented tree. Call this before creating folders or files to understand the current layout.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        if (state.snapshot.folderTree) {
+          return state.snapshot.folderTree;
+        }
+        return "Workspace tree is not available.";
+      },
+    }),
+  };
+
+  if (mode === "ask") return readOnlyTools;
+
+  const writeTools = {
+    edit_chapter: tool({
+      description:
+        "Replace the content of a chapter with new text. The change is staged and applied after the agent run completes. Provide either chapterTitle or chapterIndex plus the new plain-text content.",
+      inputSchema: z.object({
+        chapterTitle: z
+          .string()
+          .optional()
+          .describe("Exact chapter title to edit"),
+        chapterIndex: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("1-based chapter index to edit"),
+        newContent: z
+          .string()
+          .describe(
+            "The new chapter text as plain text paragraphs separated by blank lines.",
+          ),
+      }),
+      execute: async (input) => {
+        const ch = findChapter(
+          state.snapshot,
+          input.chapterTitle,
+          input.chapterIndex,
+        );
+        if (!ch)
+          return `Chapter not found. Use list_chapters to see available chapters.`;
+        state.mutations.push({
+          type: "edit_chapter",
+          chapterId: ch.id,
+          newPlainText: input.newContent,
+        });
+        ch.plainText = input.newContent;
+        return `Chapter "${ch.title}" has been updated.`;
+      },
+    }),
+
+    create_chapter: tool({
+      description:
+        "Create a new chapter at the end of the manuscript. Returns the new chapter title.",
+      inputSchema: z.object({
+        title: z.string().describe("Title for the new chapter"),
+        content: z
+          .string()
+          .optional()
+          .default("")
+          .describe("Initial plain-text content for the chapter"),
+      }),
+      execute: async (input) => {
+        state.mutations.push({
+          type: "create_chapter",
+          title: input.title,
+          plainText: input.content,
+        });
+        state.snapshot.chapters.push({
+          id: `new-${Date.now()}`,
+          title: input.title,
+          order: state.snapshot.chapters.length,
+          plainText: input.content,
+        });
+        return `Chapter "${input.title}" has been created.`;
+      },
+    }),
+
+    create_folder: tool({
+      description:
+        "Create a new folder in the workspace. Use list_workspace_tree first to see the current structure. Provide a parentPath to nest inside an existing folder, or omit it to create at the root level.",
+      inputSchema: z.object({
+        name: z.string().describe("Name for the new folder"),
+        parentPath: z
+          .string()
+          .nullable()
+          .optional()
+          .default(null)
+          .describe(
+            "Relative path of the parent folder (e.g. 'Research' or 'Chapters/Part 1'). Null or omitted to create at the workspace root.",
+          ),
+      }),
+      execute: async (input) => {
+        const sanitized = input.name.replace(/[/\\?%*:|"<>]/g, "-").trim();
+        if (!sanitized) return "Folder name cannot be empty.";
+        state.mutations.push({
+          type: "create_folder",
+          parentPath: input.parentPath ?? null,
+          name: sanitized,
+        });
+        return `Folder "${sanitized}" will be created${input.parentPath ? ` inside "${input.parentPath}"` : " at the workspace root"}.`;
+      },
+    }),
+
+    create_file: tool({
+      description:
+        "Create a new file in the workspace. Use list_workspace_tree first to see the current structure. The file can optionally be pre-filled with content.",
+      inputSchema: z.object({
+        name: z
+          .string()
+          .describe(
+            "Filename including extension (e.g. 'Chapter 1.md', 'notes.txt'). Use .md for manuscript files.",
+          ),
+        parentPath: z
+          .string()
+          .nullable()
+          .optional()
+          .default(null)
+          .describe(
+            "Relative path of the parent folder to create the file in. Null or omitted to create at the workspace root.",
+          ),
+        content: z
+          .string()
+          .optional()
+          .default("")
+          .describe("Initial text content for the file"),
+      }),
+      execute: async (input) => {
+        const sanitized = input.name.replace(/[\\?%*:|"<>]/g, "-").trim();
+        if (!sanitized) return "File name cannot be empty.";
+        state.mutations.push({
+          type: "create_file",
+          parentPath: input.parentPath ?? null,
+          name: sanitized,
+          content: input.content,
+        });
+        return `File "${sanitized}" will be created${input.parentPath ? ` inside "${input.parentPath}"` : " at the workspace root"}${input.content ? " with initial content" : ""}.`;
+      },
+    }),
+
     manage_todo_list: tool({
       description:
         "Maintain a visible task list for the current session. Call this at the start of complex tasks to outline your plan, then update as you complete steps.",
@@ -292,4 +381,6 @@ export function buildWritingTools(state: AgentSessionState) {
       },
     }),
   };
+
+  return { ...readOnlyTools, ...writeTools };
 }

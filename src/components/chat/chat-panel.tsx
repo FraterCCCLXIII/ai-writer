@@ -26,14 +26,13 @@ import {
 import { useProjectStore } from "@/store/project-store";
 import { jsonToPlainText } from "@/lib/tiptap-plain-text";
 import { dispatchInsertToEditor } from "@/lib/editor-insert-events";
-import { getAiOverridesForRequest } from "@/lib/ai-settings";
 import { AgentTodos } from "@/components/chat/agent-todos";
 import { runAgentTurn } from "@/lib/ai/agent-loop";
 import { getModeNudge } from "@/lib/ai/intent-classifier";
 import type { AgentWorkspaceSnapshot, ChatMode } from "@/lib/ai/types";
 import { stripRevisionArtifacts } from "@/lib/ai/prompts";
 import { ChatMarkdown } from "@/components/chat/chat-markdown";
-import { collectFiles } from "@/documents/workspace-types";
+import { collectFiles, type WorkspaceNode } from "@/documents/workspace-types";
 
 function selectionPreview(text: string, max = 72) {
   const t = text.replace(/\s+/g, " ").trim();
@@ -131,8 +130,22 @@ export function ChatPanel() {
         };
       }),
       researchDocuments: [],
+      folderTree: serializeTree(snap.config.tree),
     };
   };
+
+  function serializeTree(nodes: WorkspaceNode[], indent = 0): string {
+    const prefix = "  ".repeat(indent);
+    return nodes
+      .map((n) => {
+        if (n.kind === "folder") {
+          const children = serializeTree(n.children, indent + 1);
+          return `${prefix}📁 ${n.name}/\n${children}`;
+        }
+        return `${prefix}📄 ${n.name}`;
+      })
+      .join("\n");
+  }
 
   const buildMessageHistory = (
     latestUserMessage: string,
@@ -149,10 +162,18 @@ export function ChatPanel() {
     return history;
   };
 
-  const sendAgent = async (text: string) => {
+  const send = async () => {
+    const text = input.trim();
+    if (!text || streaming) return;
+
+    setInput("");
+    setModeNudge(null);
+
     const snap = useProjectStore.getState();
     const snapshot = buildSnapshot();
     const messages = buildMessageHistory(text);
+    const ctxAtSend = snap.editorContext;
+    const activeFilePath = snap.config.activeFilePath;
 
     appendChatMessage({ role: "user", content: text });
     const assistant = appendChatMessage({ role: "assistant", content: "" });
@@ -183,6 +204,27 @@ export function ChatPanel() {
               : `${mutations.length} files updated`,
           );
         }
+        // In edit mode with a text selection, treat the AI response as a revision
+        if (
+          snap.chatMode === "edit" &&
+          ctxAtSend &&
+          activeFilePath === ctxAtSend.filePath &&
+          mutations.length === 0
+        ) {
+          const trimmed = acc.trim();
+          if (trimmed && !trimmed.startsWith("[Error]")) {
+            const replacementText = stripRevisionArtifacts(trimmed);
+            if (replacementText) {
+              setPendingRevision({
+                filePath: ctxAtSend.filePath,
+                from: ctxAtSend.from,
+                to: ctxAtSend.to,
+                replacementText,
+                assistantMessageId: assistant.id,
+              });
+            }
+          }
+        }
         flushWorkspace();
       },
       onError: (msg) => {
@@ -196,100 +238,6 @@ export function ChatPanel() {
 
     setStreaming(false);
     setStreamBuffer(null);
-  };
-
-  const sendAskEdit = async (text: string) => {
-    const snap = useProjectStore.getState();
-    const ctxAtSend = snap.editorContext;
-    const activeFilePath = snap.config.activeFilePath;
-    const activeEntry = activeFilePath
-      ? snap.openFiles.get(activeFilePath)
-      : null;
-
-    appendChatMessage({ role: "user", content: text });
-    const assistant = appendChatMessage({ role: "assistant", content: "" });
-    setStreaming(true);
-    setStreamBuffer({ id: assistant.id, text: "" });
-    abortRef.current?.abort();
-    abortRef.current = new AbortController();
-
-    let acc = "";
-    try {
-      const res = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: text,
-          context: {
-            selectedText: ctxAtSend?.text ?? null,
-            chapterTitle: activeFilePath ?? null,
-            chapterPlainText: activeEntry
-              ? jsonToPlainText(activeEntry.content)
-              : "",
-            relevantResearchSnippets: [],
-          },
-          ...getAiOverridesForRequest(snap.chatMode),
-        }),
-        signal: abortRef.current.signal,
-      });
-      if (!res.ok) {
-        const err = await res.text();
-        throw new Error(err || `HTTP ${res.status}`);
-      }
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No body");
-      const dec = new TextDecoder();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        acc += dec.decode(value, { stream: true });
-        setStreamBuffer({ id: assistant.id, text: acc });
-        patchChatMessage(assistant.id, acc);
-      }
-      const trimmed = acc.trim();
-      if (
-        ctxAtSend &&
-        activeFilePath === ctxAtSend.filePath &&
-        trimmed &&
-        !trimmed.startsWith("[Error]")
-      ) {
-        const replacementText = stripRevisionArtifacts(trimmed);
-        if (replacementText) {
-          setPendingRevision({
-            filePath: ctxAtSend.filePath,
-            from: ctxAtSend.from,
-            to: ctxAtSend.to,
-            replacementText,
-            assistantMessageId: assistant.id,
-          });
-        }
-      }
-      flushWorkspace();
-    } catch (e) {
-      if ((e as Error).name === "AbortError") return;
-      const msg = e instanceof Error ? e.message : "Request failed";
-      acc = `[Error] ${msg}`;
-      patchChatMessage(assistant.id, acc);
-      setStreamBuffer({ id: assistant.id, text: acc });
-      flushWorkspace();
-    } finally {
-      setStreaming(false);
-      setStreamBuffer(null);
-    }
-  };
-
-  const send = async () => {
-    const text = input.trim();
-    if (!text || streaming) return;
-
-    setInput("");
-    setModeNudge(null);
-
-    if (chatMode === "agent") {
-      await sendAgent(text);
-    } else {
-      await sendAskEdit(text);
-    }
   };
 
   const messageBody = (id: string, role: "user" | "assistant", stored: string) => {

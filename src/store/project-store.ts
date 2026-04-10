@@ -22,6 +22,7 @@ import {
   writeWorkspaceConfig,
   readWorkspaceFile,
   writeWorkspaceFile,
+  writeWorkspaceBinaryFile,
   createWorkspaceFile,
   createWorkspaceDir,
   deleteWorkspacePath,
@@ -32,7 +33,7 @@ import {
   supportsNativeFolderPicker,
   type WorkspaceIndexEntry,
 } from "@/lib/workspace-fs";
-import { jsonContentToMarkdown, markdownToJsonContent, isEditableFile } from "@/lib/markdown-serialize";
+import { jsonContentToMarkdown, markdownToJsonContent, isEditableFile, getFileExtension } from "@/lib/markdown-serialize";
 import { paragraphDocFromPlainText } from "@/lib/plain-text-insert";
 import type { ChatMode, TodoItem, WriteMutation } from "@/lib/ai/types";
 
@@ -101,6 +102,7 @@ type ProjectState = {
   // Tree operations
   selectFile: (path: string) => Promise<void>;
   createFile: (parentPath: string | null, name: string) => Promise<void>;
+  importFileIntoFolder: (parentPath: string | null, file: File) => Promise<void>;
   createFolder: (parentPath: string | null, name: string) => Promise<void>;
   renameNode: (oldPath: string, newName: string) => Promise<void>;
   deleteNode: (path: string) => Promise<void>;
@@ -388,6 +390,54 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       schedulePersist();
     },
 
+    importFileIntoFolder: async (parentPath, file) => {
+      const s = get();
+      if (!s.workspacePath) return;
+
+      const name = file.name || "imported-file";
+      const relativePath = parentPath ? `${parentPath}/${name}` : name;
+      const ext = getFileExtension(name);
+
+      const TEXT_EXTS = new Set([
+        "md", "markdown", "mdx", "txt", "text", "log",
+        "csv", "tsv", "xml", "yaml", "yml", "json",
+        "html", "htm", "xhtml", "tex", "rtf",
+        "js", "ts", "tsx", "jsx", "css", "scss",
+        "doc", "docx", "docm", "dotx", "",
+      ]);
+
+      const node: FileNode = {
+        kind: "file",
+        id: createId(),
+        name,
+        path: relativePath,
+      };
+
+      set((prev) => ({
+        config: {
+          ...prev.config,
+          tree: insertNode(prev.config.tree, node, parentPath),
+        },
+      }));
+
+      try {
+        if (TEXT_EXTS.has(ext)) {
+          const text = await file.text();
+          await writeWorkspaceFile(s.workspacePath, relativePath, text);
+        } else {
+          const buffer = await file.arrayBuffer();
+          await writeWorkspaceBinaryFile(s.workspacePath, relativePath, buffer);
+        }
+        toast.success(`Imported ${name}`);
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Could not import that file.",
+        );
+      }
+
+      schedulePersist();
+    },
+
     createFolder: async (parentPath, name) => {
       const s = get();
       if (!s.workspacePath) return;
@@ -637,6 +687,28 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         } else if (mutation.type === "create_chapter") {
           const name = mutation.title.replace(/[/\\?%*:|"<>]/g, "-") + ".md";
           void get().createFile(null, name);
+        } else if (mutation.type === "create_folder") {
+          void get().createFolder(mutation.parentPath, mutation.name);
+        } else if (mutation.type === "create_file") {
+          void get().createFile(mutation.parentPath, mutation.name).then(() => {
+            if (mutation.content) {
+              const parentPath = mutation.parentPath;
+              const relativePath = parentPath
+                ? `${parentPath}/${mutation.name}`
+                : mutation.name;
+              const content = paragraphDocFromPlainText(mutation.content);
+              set((prev) => {
+                const updated = new Map(prev.openFiles);
+                updated.set(relativePath, {
+                  path: relativePath,
+                  content,
+                  dirty: true,
+                });
+                return { openFiles: updated };
+              });
+              scheduleFileSave(relativePath);
+            }
+          });
         }
       }
 

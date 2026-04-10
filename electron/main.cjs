@@ -289,6 +289,16 @@ ipcMain.handle("fs:write-text-file", async (_event, filePath, contents) => {
   await fsp.rename(tmp, filePath);
 });
 
+ipcMain.handle("fs:write-binary-file", async (_event, filePath, buffer) => {
+  validateAbsolute(filePath);
+  if (!(buffer instanceof Buffer || buffer instanceof Uint8Array))
+    throw new Error("Buffer must be a Uint8Array or Buffer");
+  await fsp.mkdir(path.dirname(filePath), { recursive: true });
+  const tmp = filePath + ".tmp";
+  await fsp.writeFile(tmp, Buffer.from(buffer));
+  await fsp.rename(tmp, filePath);
+});
+
 ipcMain.handle("fs:create-dir", async (_event, dirPath) => {
   validateAbsolute(dirPath);
   await fsp.mkdir(dirPath, { recursive: true });
