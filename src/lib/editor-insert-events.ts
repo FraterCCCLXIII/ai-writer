@@ -4,6 +4,11 @@ export type InsertEditorDetail = {
   text: string;
   /** replace selection if any; otherwise insert at cursor */
   mode: "insert" | "replace";
+  format?: "markdown" | "plain-text";
+  targetRange?: {
+    from: number;
+    to: number;
+  };
 };
 
 export function dispatchInsertToEditor(detail: InsertEditorDetail) {

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 "use strict";
 
 if (
@@ -13,6 +14,23 @@ const fsp = fs.promises;
 const path = require("path");
 const { spawn } = require("child_process");
 const http = require("http");
+const { processDictationAudio } = require("./dictation.cjs");
+const {
+  ensureOllamaRunning,
+  getOllamaStatus,
+  pullOllamaModel,
+} = require("./dictation-ollama.cjs");
+const { loadSettings, updateSettings } = require("./dictation-settings.cjs");
+const { applyLaunchAtLogin } = require("./login-item.cjs");
+const {
+  ensureNativeHelper,
+  getFocusInfo,
+} = require("./native-helper.cjs");
+const {
+  getPermissionState,
+  requestMicrophoneAccess,
+  requestSystemAccess,
+} = require("./permissions.cjs");
 
 const packageName = require(path.join(__dirname, "..", "package.json")).name;
 
@@ -21,11 +39,22 @@ const isDev =
   process.env.NODE_ENV === "development" ||
   !app.isPackaged;
 
+const DEV_PORT = process.env.PORT || "3000";
 const DEV_URL =
-  process.env.ELECTRON_DEV_URL || "http://127.0.0.1:3000";
+  process.env.ELECTRON_DEV_URL || `http://127.0.0.1:${DEV_PORT}`;
 
 let mainWindow = null;
+let overlayWindow = null;
 let nextChild = null;
+let helperReady = false;
+let dictationSettings = null;
+let dictationStatus = {
+  phase: "idle",
+  title: "Ready",
+  detail: "Hold Fn to dictate. Release Fn to paste.",
+};
+let appUrl = null;
+let dictationStatusResetTimer = null;
 
 /** Hidden directory inside workspace folders for app config. */
 const WORKSPACE_CONFIG_DIR = ".aiwriter";
@@ -109,6 +138,27 @@ function startStandaloneServer(port) {
   });
 }
 
+async function ensureAppUrl() {
+  if (appUrl) return appUrl;
+  if (isDev) {
+    appUrl = DEV_URL;
+    return appUrl;
+  }
+
+  const port = await pickPort();
+  startStandaloneServer(port);
+  appUrl = `http://127.0.0.1:${port}`;
+  await waitForServer(appUrl);
+  return appUrl;
+}
+
+function appUrlWithHash(hash = "") {
+  if (!appUrl) {
+    throw new Error("App URL is not ready.");
+  }
+  return hash ? `${appUrl}#${hash}` : appUrl;
+}
+
 function bindWindowMaximizeEvents(win) {
   const send = (maximized) => {
     win.webContents.send("window:maximized-changed", maximized);
@@ -153,21 +203,196 @@ async function createWindowAsync() {
     mainWindow.webContents.on("did-fail-load", (_event, code, desc, url) => {
       console.error("[electron] did-fail-load", { code, desc, url });
     });
-    await mainWindow.loadURL(DEV_URL);
+    await ensureAppUrl();
+    await mainWindow.loadURL(appUrlWithHash());
     if (process.env.ELECTRON_OPEN_DEVTOOLS === "1") {
       mainWindow.webContents.openDevTools({ mode: "detach" });
     }
   } else {
-    const port = await pickPort();
-    startStandaloneServer(port);
-    const url = `http://127.0.0.1:${port}`;
-    await waitForServer(url);
-    await mainWindow.loadURL(url);
+    await ensureAppUrl();
+    await mainWindow.loadURL(appUrlWithHash());
   }
 
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
+}
+
+async function createOverlayWindowAsync() {
+  overlayWindow = new BrowserWindow({
+    width: 320,
+    height: 68,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    focusable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    alwaysOnTop: true,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: !isDev,
+    },
+  });
+
+  overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  overlayWindow.setAlwaysOnTop(true, "floating");
+  overlayWindow.setIgnoreMouseEvents(true);
+
+  const { screen } = require("electron");
+  const cursor = screen.getCursorScreenPoint();
+  const display = screen.getDisplayNearestPoint(cursor);
+  const workArea = display.workArea;
+  const width = 320;
+  const height = 68;
+  const margin = 24;
+
+  overlayWindow.setBounds({
+    x: workArea.x + Math.round((workArea.width - width) / 2),
+    y: workArea.y + workArea.height - height - margin,
+    width,
+    height,
+  });
+
+  await ensureAppUrl();
+  await overlayWindow.loadURL(appUrlWithHash("overlay"));
+
+  overlayWindow.on("closed", () => {
+    overlayWindow = null;
+  });
+}
+
+async function ensureOverlayWindow() {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    return overlayWindow;
+  }
+  await createOverlayWindowAsync();
+  return overlayWindow;
+}
+
+async function showOverlay() {
+  const win = await ensureOverlayWindow();
+  if (!win || win.isDestroyed()) return;
+  win.showInactive();
+}
+
+function hideOverlay() {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.hide();
+  }
+}
+
+function broadcast(channel, payload) {
+  for (const win of [mainWindow, overlayWindow]) {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(channel, payload);
+    }
+  }
+}
+
+function setDictationStatus(nextStatus) {
+  if (dictationStatusResetTimer) {
+    clearTimeout(dictationStatusResetTimer);
+    dictationStatusResetTimer = null;
+  }
+  dictationStatus = nextStatus;
+  broadcast("dictation:status", nextStatus);
+  if (dictationSettings?.showOverlay || nextStatus.phase !== "idle") {
+    void showOverlay();
+  } else {
+    hideOverlay();
+  }
+  if (nextStatus.phase === "done" || nextStatus.phase === "error") {
+    dictationStatusResetTimer = setTimeout(() => {
+      dictationStatusResetTimer = null;
+      setDictationStatus({
+        phase: "idle",
+        title: "Ready",
+        detail: "Hold Fn to dictate. Release Fn to paste.",
+      });
+    }, 1500);
+  }
+}
+
+function hasEntries(dirPath) {
+  try {
+    return fs.readdirSync(dirPath).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function buildDictationBootstrapState() {
+  if (!dictationSettings) {
+    dictationSettings = await loadSettings();
+  }
+
+  const permissions = await getPermissionState();
+  if (
+    helperReady &&
+    permissions.accessibility &&
+    permissions.inputMonitoring &&
+    permissions.postEvents
+  ) {
+    await ensureHotkeyListener();
+  }
+  const ollamaReachable = await ensureOllamaRunning(dictationSettings.ollamaBaseUrl);
+  const ollamaModels = ollamaReachable
+    ? await getOllamaStatus(dictationSettings.ollamaBaseUrl).then((s) => s.models)
+    : [];
+  const { getDefaultModelCacheDir } = require("./dictation-transcription.cjs");
+  const speechModelReady = hasEntries(
+    getDefaultModelCacheDir(app.getPath("userData")),
+  );
+
+  return {
+    settings: dictationSettings,
+    permissions,
+    ollamaReachable,
+    ollamaModels,
+    recommendedModelInstalled: ollamaModels.some(
+      (model) => model.name === dictationSettings.textModel,
+    ),
+    speechModelReady,
+    helperReady,
+    status: dictationStatus,
+  };
+}
+
+async function ensureHotkeyListener() {
+  if (!helperReady || isFnListenerRunning()) {
+    return;
+  }
+
+  const permissions = await getPermissionState();
+  if (
+    !permissions.accessibility ||
+    !permissions.inputMonitoring ||
+    !permissions.postEvents
+  ) {
+    return;
+  }
+
+  await startFnListener(
+    (event) => {
+      broadcast("dictation:hotkey", event);
+      if (event.type === "down") {
+        void showOverlay();
+      }
+    },
+    (message) => {
+      setDictationStatus({
+        phase: "error",
+        title: "Fn key unavailable",
+        detail: message,
+      });
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -358,6 +583,190 @@ ipcMain.handle("fs:has-legacy-workspace", async (_event, folderPath) => {
 });
 
 // ---------------------------------------------------------------------------
+// Dictation IPC
+// ---------------------------------------------------------------------------
+
+function validateDictationRequest(request) {
+  if (!request || typeof request !== "object") {
+    throw new Error("Invalid dictation request");
+  }
+
+  const { wavBase64, settings } = request;
+  if (typeof wavBase64 !== "string" || !wavBase64.trim()) {
+    throw new Error("Missing dictation audio payload");
+  }
+
+  if (!settings || typeof settings !== "object") {
+    throw new Error("Missing dictation settings");
+  }
+
+  if (typeof settings.whisperModel !== "string" || !settings.whisperModel.trim()) {
+    throw new Error("Missing Whisper model");
+  }
+
+  if (typeof settings.ollamaBaseUrl !== "string" || !settings.ollamaBaseUrl.trim()) {
+    throw new Error("Missing Ollama base URL");
+  }
+
+  if (
+    settings.styleMode !== "conversation" &&
+    settings.styleMode !== "vibe-coding"
+  ) {
+    throw new Error("Invalid dictation style mode");
+  }
+
+  if (
+    settings.enhancementLevel !== "none" &&
+    settings.enhancementLevel !== "soft" &&
+    settings.enhancementLevel !== "medium" &&
+    settings.enhancementLevel !== "high"
+  ) {
+    throw new Error("Invalid dictation enhancement level");
+  }
+
+  return {
+    wavBase64,
+    settings: {
+      enabled: Boolean(settings.enabled),
+      whisperModel: settings.whisperModel.trim(),
+      ollamaBaseUrl: settings.ollamaBaseUrl.trim(),
+      textModel:
+        typeof settings.textModel === "string" ? settings.textModel.trim() : "",
+      styleMode: settings.styleMode,
+      enhancementLevel: settings.enhancementLevel,
+      autoPaste: Boolean(settings.autoPaste),
+      showOverlay: Boolean(settings.showOverlay),
+      launchAtLogin: Boolean(settings.launchAtLogin),
+      setupComplete: Boolean(settings.setupComplete),
+    },
+    targetFocus: request.targetFocus,
+  };
+}
+
+ipcMain.handle("dictation:process-audio", async (_event, request) => {
+  const input = validateDictationRequest(request);
+  return processDictationAudio({
+    ...input,
+    userDataPath: app.getPath("userData"),
+    setStatus: setDictationStatus,
+  });
+});
+
+ipcMain.handle("dictation:get-ollama-status", async (_event, baseUrl) => {
+  if (typeof baseUrl !== "string" || !baseUrl.trim()) {
+    throw new Error("Missing Ollama base URL");
+  }
+  return getOllamaStatus(baseUrl.trim());
+});
+
+ipcMain.handle("dictation:launch-ollama", async (_event, baseUrl) => {
+  if (typeof baseUrl !== "string" || !baseUrl.trim()) {
+    throw new Error("Missing Ollama base URL");
+  }
+  await ensureOllamaRunning(baseUrl.trim());
+  return getOllamaStatus(baseUrl.trim());
+});
+
+ipcMain.handle("dictation:pull-ollama-model", async (_event, baseUrl, modelName) => {
+  if (typeof baseUrl !== "string" || !baseUrl.trim()) {
+    throw new Error("Missing Ollama base URL");
+  }
+  if (typeof modelName !== "string" || !modelName.trim()) {
+    throw new Error("Missing Ollama model name");
+  }
+
+  const normalizedBaseUrl = baseUrl.trim();
+  const reachable = await ensureOllamaRunning(normalizedBaseUrl);
+  if (!reachable) {
+    throw new Error(
+      `Ollama is not running at ${normalizedBaseUrl}. Install or start Ollama, then try again.`,
+    );
+  }
+
+  await pullOllamaModel(normalizedBaseUrl, modelName.trim());
+  return getOllamaStatus(normalizedBaseUrl);
+});
+
+ipcMain.handle("dictation:bootstrap", async () => {
+  return buildDictationBootstrapState();
+});
+
+ipcMain.handle("dictation:request-microphone-access", async () => {
+  await requestMicrophoneAccess();
+  return buildDictationBootstrapState();
+});
+
+ipcMain.handle("dictation:request-system-access", async () => {
+  await requestSystemAccess();
+  helperReady = await ensureNativeHelper();
+  return buildDictationBootstrapState();
+});
+
+ipcMain.handle("dictation:capture-target", async () => {
+  return getFocusInfo();
+});
+
+ipcMain.handle("dictation:update-settings", async (_event, nextSettings) => {
+  if (!nextSettings || typeof nextSettings !== "object") {
+    throw new Error("Invalid dictation settings");
+  }
+
+  dictationSettings = await updateSettings(
+    dictationSettings || (await loadSettings()),
+    nextSettings,
+  );
+  applyLaunchAtLogin(Boolean(dictationSettings.launchAtLogin));
+  return buildDictationBootstrapState();
+});
+
+ipcMain.handle("dictation:prepare-speech-model", async () => {
+  const settings = dictationSettings || (await loadSettings());
+  const {
+    getDefaultModelCacheDir,
+    prepareTranscriber,
+  } = require("./dictation-transcription.cjs");
+
+  setDictationStatus({
+    phase: "transcribing",
+    title: "Preparing speech model",
+    detail: "Downloading and warming the local Whisper model.",
+  });
+
+  await prepareTranscriber({
+    whisperModel: settings.whisperModel,
+    modelCacheDir: getDefaultModelCacheDir(app.getPath("userData")),
+  });
+
+  setDictationStatus({
+    phase: "idle",
+    title: "Ready",
+    detail: "Hold Fn to dictate. Release Fn to paste.",
+  });
+
+  return buildDictationBootstrapState();
+});
+
+ipcMain.on("dictation:push-status", (_event, nextStatus) => {
+  if (!nextStatus || typeof nextStatus !== "object") return;
+  setDictationStatus(nextStatus);
+});
+
+ipcMain.handle("system:open-external", async (_event, targetUrl) => {
+  if (typeof targetUrl !== "string" || !targetUrl.trim()) {
+    throw new Error("Missing external URL");
+  }
+  await shell.openExternal(targetUrl);
+});
+
+ipcMain.handle("system:show-main-window", async () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+});
+
+// ---------------------------------------------------------------------------
 // App lifecycle
 // ---------------------------------------------------------------------------
 
@@ -386,7 +795,15 @@ app.whenReady().then(() => {
     });
   }
 
+  void (async () => {
+    dictationSettings = await loadSettings();
+    applyLaunchAtLogin(Boolean(dictationSettings.launchAtLogin));
+    helperReady = await ensureNativeHelper();
+    await ensureHotkeyListener();
+  })();
+
   void createWindowAsync();
+  void ensureOverlayWindow();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindowAsync();
@@ -394,6 +811,7 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
+  stopFnListener();
   if (nextChild) {
     try {
       nextChild.kill("SIGTERM");
@@ -406,6 +824,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  stopFnListener();
   if (nextChild) {
     try {
       nextChild.kill("SIGTERM");

@@ -7,6 +7,7 @@ import {
   type InsertEditorDetail,
 } from "@/lib/editor-insert-events";
 import { markdownToTiptapNodes } from "@/lib/ai/markdown-to-tiptap";
+import { plainTextToInsertContent } from "@/lib/plain-text-insert";
 
 /**
  * Listens for chat panel actions and inserts text into the active TipTap editor.
@@ -23,16 +24,36 @@ export function InsertFromChatBridge() {
       const text = detail.text.trim();
       if (!text) return;
 
-      const nodes = markdownToTiptapNodes(text);
+      const nodes =
+        detail.format === "plain-text"
+          ? plainTextToInsertContent(text)
+          : markdownToTiptapNodes(text);
 
-      editor.chain().focus();
+      const chain = editor.chain().focus();
 
-      if (detail.mode === "replace" && !editor.state.selection.empty) {
-        editor.chain().deleteSelection().insertContent(nodes).run();
+      if (detail.targetRange) {
+        const docSize = editor.state.doc.content.size;
+        const from = Math.max(0, Math.min(detail.targetRange.from, docSize));
+        const to = Math.max(0, Math.min(detail.targetRange.to, docSize));
+        if (from === to) {
+          chain.setTextSelection(from);
+        } else {
+          chain.setTextSelection({ from, to });
+        }
+      }
+
+      const shouldReplace =
+        detail.mode === "replace" &&
+        ((detail.targetRange &&
+          detail.targetRange.from !== detail.targetRange.to) ||
+          !editor.state.selection.empty);
+
+      if (shouldReplace) {
+        chain.deleteSelection().insertContent(nodes).run();
         return;
       }
 
-      editor.chain().insertContent(nodes).run();
+      chain.insertContent(nodes).run();
     };
 
     window.addEventListener(

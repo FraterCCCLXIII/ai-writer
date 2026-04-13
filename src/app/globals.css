@@ -57,6 +57,10 @@ body {
   font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 }
 
+body.dictation-overlay-body {
+  background: transparent !important;
+}
+
 /* Global custom scrollbars (viewport + overflow containers) */
 * {
   scrollbar-width: thin;
@@ -171,4 +175,71 @@ body {
 .chat-scroll::-webkit-scrollbar {
   width: 6px;
   height: 6px;
+}
+
+.dictation-overlay-shell {
+  display: flex;
+  min-width: 18rem;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: 9999px;
+  border: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
+  background: color-mix(in oklab, var(--background) 82%, transparent);
+  padding: 0.7rem 1rem;
+  color: var(--foreground);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+}
+
+.dictation-overlay-shell.is-active {
+  border-color: color-mix(in oklab, var(--ring) 45%, transparent);
+}
+
+.dictation-overlay-shell.is-processing {
+  border-color: color-mix(in oklab, var(--foreground) 25%, transparent);
+}
+
+.dictation-overlay-shell.is-done {
+  border-color: color-mix(in oklab, var(--foreground) 35%, transparent);
+}
+
+.dictation-overlay-label {
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.dictation-audio-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.18rem;
+}
+
+.dictation-audio-cell {
+  height: 0.45rem;
+  width: 0.45rem;
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--foreground) 12%, transparent);
+  transition: background-color 140ms ease, transform 140ms ease;
+}
+
+.dictation-audio-cell.is-on {
+  background: color-mix(in oklab, var(--foreground) 92%, transparent);
+  transform: scale(1.08);
+}
+
+.dictation-audio-grid.is-processing .dictation-audio-cell {
+  animation: dictation-overlay-wave 1.1s ease-in-out infinite;
+}
+
+@keyframes dictation-overlay-wave {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.88);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
 }

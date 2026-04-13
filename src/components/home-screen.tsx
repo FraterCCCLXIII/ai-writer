@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   FolderOpen,
   Home as HomeIcon,
@@ -11,11 +11,17 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppMenu } from "@/components/app-menu";
+import { DictationSetupWizard } from "@/components/dictation-setup-wizard";
 import { ElectronTitleBar } from "@/components/electron-title-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { isElectronApp } from "@/lib/electron-bridge";
+import {
+  DICTATION_SETTINGS_EVENT,
+  loadDictationSettings,
+  saveDictationSettings,
+} from "@/lib/dictation/settings";
 import { readWorkspaceConfig, type WorkspaceIndexEntry } from "@/lib/workspace-fs";
 import { useProjectStore } from "@/store/project-store";
 import { cn } from "@/lib/utils";
@@ -30,6 +36,42 @@ export function HomeScreen() {
 
   const [homeTab, setHomeTab] = useState<HomeTab>("new");
   const [allProjectsSearch, setAllProjectsSearch] = useState("");
+  const [setupComplete, setSetupComplete] = useState<boolean | null>(
+    () => (!isElectronApp() ? true : null),
+  );
+
+  useEffect(() => {
+    if (!isElectronApp()) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const next = await window.electronAPI?.dictationBootstrap?.();
+        if (cancelled) return;
+        if (next) {
+          saveDictationSettings(next.settings);
+          setSetupComplete(next.settings.setupComplete);
+        } else {
+          setSetupComplete(true);
+        }
+      } catch {
+        if (!cancelled) setSetupComplete(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isElectronApp()) return;
+    const sync = () => {
+      setSetupComplete(loadDictationSettings().setupComplete);
+    };
+    window.addEventListener(DICTATION_SETTINGS_EVENT, sync);
+    return () => window.removeEventListener(DICTATION_SETTINGS_EVENT, sync);
+  }, []);
 
   const filteredAllProjects = useMemo(() => {
     const q = allProjectsSearch.trim().toLowerCase();
@@ -70,6 +112,15 @@ export function HomeScreen() {
     const parts = path.replace(/[/\\]+$/, "").split(/[/\\]/);
     return parts[parts.length - 1] || path;
   };
+
+  if (isElectronApp() && setupComplete === false) {
+    return (
+      <div className="flex min-h-screen flex-col bg-background text-foreground">
+        <ElectronTitleBar title="Manuscript" />
+        <DictationSetupWizard />
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">

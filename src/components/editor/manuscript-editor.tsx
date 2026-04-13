@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDebouncedCallback } from "use-debounce";
 import {
   EditorCommand,
@@ -17,6 +17,7 @@ import {
 } from "novel";
 import type { Editor } from "@tiptap/core";
 import "katex/dist/katex.min.css";
+import { toast } from "sonner";
 
 import { baseExtensions } from "./extensions";
 import {
@@ -39,20 +40,26 @@ import type { InlineAction } from "@/lib/ai/types";
 import { jsonToPlainText } from "@/lib/tiptap-plain-text";
 import { normalizePastedHtmlForParagraphs } from "@/lib/plain-text-blocks";
 import { stripColorFromPastedSlice } from "@/lib/strip-pasted-color";
+import { dispatchInsertToEditor } from "@/lib/editor-insert-events";
+import { AudioRecorder } from "@/lib/dictation/audio-recorder";
+import {
+  DICTATION_SETTINGS_EVENT,
+  loadDictationSettings,
+} from "@/lib/dictation/settings";
+import { getDesktopDictationAdapter } from "@/lib/dictation/runtime";
+import type { DictationPhase } from "@/lib/dictation/types";
 
 type Props = {
   /** Now a file path rather than a chapter UUID. */
   chapterId: string;
   initialContent: JSONContent;
   focusMode?: boolean;
-  surface?: "chapter" | "research";
 };
 
 export function ManuscriptEditor({
   chapterId,
   initialContent,
   focusMode = false,
-  surface = "chapter",
 }: Props) {
   const updateActiveFileContent = useProjectStore(
     (s) => s.updateActiveFileContent,
@@ -62,6 +69,52 @@ export function ManuscriptEditor({
   const [inlineRequest, setInlineRequest] = useState<InlineAiRequest | null>(
     null,
   );
+  const [dictationPhase, setDictationPhase] = useState<DictationPhase>("idle");
+  const [dictationEnabled, setDictationEnabled] = useState(
+    () => loadDictationSettings().enabled,
+  );
+  const recorderRef = useRef<AudioRecorder | null>(null);
+  const phaseResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const resetDictationPhaseLater = useCallback(() => {
+    if (phaseResetTimeoutRef.current) {
+      clearTimeout(phaseResetTimeoutRef.current);
+    }
+    phaseResetTimeoutRef.current = setTimeout(() => {
+      setDictationPhase("idle");
+    }, 1500);
+  }, []);
+
+  const getRecorder = useCallback(() => {
+    if (!recorderRef.current) {
+      const recorder = new AudioRecorder();
+      recorderRef.current = recorder;
+    }
+    return recorderRef.current;
+  }, []);
+
+  useEffect(() => {
+    const syncSettings = () => {
+      setDictationEnabled(loadDictationSettings().enabled);
+    };
+
+    window.addEventListener(DICTATION_SETTINGS_EVENT, syncSettings);
+    return () => {
+      window.removeEventListener(DICTATION_SETTINGS_EVENT, syncSettings);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (phaseResetTimeoutRef.current) {
+        clearTimeout(phaseResetTimeoutRef.current);
+      }
+      const recorder = recorderRef.current;
+      if (recorder) {
+        void recorder.cancel().catch(() => {});
+      }
+    };
+  }, []);
 
   const openInline = useCallback(
     (action: InlineAction, range: { from: number; to: number }, editor: Editor) => {
@@ -122,6 +175,105 @@ export function ManuscriptEditor({
     [],
   );
 
+  const handleDictationToggle = useCallback(
+    async (payload: {
+      mode: "insert" | "replace";
+      targetRange?: { from: number; to: number };
+    }) => {
+      const adapter = getDesktopDictationAdapter();
+      if (!adapter.isAvailable()) {
+        toast.error("Dictation is only available in the desktop app.");
+        return;
+      }
+
+      const settings = loadDictationSettings();
+      setDictationEnabled(settings.enabled);
+
+      if (!settings.enabled) {
+        toast.message("Enable dictation in Settings to record in the desktop app.");
+        return;
+      }
+
+      const recorder = getRecorder();
+
+      if (dictationPhase === "recording") {
+        try {
+          setDictationPhase("transcribing");
+          const wavBase64 = await recorder.stop();
+
+          const result = await adapter.processAudio({
+            wavBase64,
+            settings: {
+              whisperModel: settings.whisperModel,
+              ollamaBaseUrl: settings.ollamaBaseUrl,
+              textModel: settings.textModel,
+              styleMode: settings.styleMode,
+              enhancementLevel: settings.enhancementLevel,
+              autoPaste: settings.autoPaste,
+              showOverlay: settings.showOverlay,
+              launchAtLogin: settings.launchAtLogin,
+              setupComplete: settings.setupComplete,
+            },
+          });
+
+          dispatchInsertToEditor({
+            text: result.finalText,
+            mode: payload.mode,
+            format: "plain-text",
+            targetRange: payload.targetRange,
+          });
+
+          setDictationPhase("done");
+          if (result.usedRewriteFallback && settings.textModel.trim()) {
+            toast.message("Inserted the raw transcription because Ollama was unavailable.");
+          }
+          resetDictationPhaseLater();
+        } catch (error) {
+          setDictationPhase("error");
+          toast.error(
+            error instanceof Error ? error.message : "Could not process the recording.",
+          );
+          resetDictationPhaseLater();
+        }
+        return;
+      }
+
+      if (dictationPhase === "transcribing" || dictationPhase === "rewriting") {
+        return;
+      }
+
+      try {
+        if (phaseResetTimeoutRef.current) {
+          clearTimeout(phaseResetTimeoutRef.current);
+          phaseResetTimeoutRef.current = null;
+        }
+        await recorder.start();
+        setDictationPhase("recording");
+      } catch (error) {
+        setDictationPhase("error");
+        toast.error(
+          error instanceof Error ? error.message : "Could not start recording.",
+        );
+        resetDictationPhaseLater();
+      }
+    },
+    [dictationPhase, getRecorder, resetDictationPhaseLater],
+  );
+
+  const dictationControls = useMemo(
+    () => ({
+      available: getDesktopDictationAdapter().isAvailable(),
+      enabled: dictationEnabled,
+      phase: dictationPhase,
+      onToggle: handleDictationToggle,
+    }),
+    [
+      dictationEnabled,
+      dictationPhase,
+      handleDictationToggle,
+    ],
+  );
+
   return (
     <>
       <EditorRoot>
@@ -129,7 +281,10 @@ export function ManuscriptEditor({
           key={chapterId}
           slotBefore={
             !focusMode ? (
-              <EditorToolbar onInline={onInlineFromBubble} />
+              <EditorToolbar
+                onInline={onInlineFromBubble}
+                dictation={dictationControls}
+              />
             ) : null
           }
           slotAfter={<ImageResizer />}

@@ -10,6 +10,7 @@ import { ManuscriptEditor } from "@/components/editor/manuscript-editor";
 import { CommandPalette } from "@/components/command-palette";
 import { ElectronTitleBar } from "@/components/electron-title-bar";
 import { HomeScreen } from "@/components/home-screen";
+import { DictationOverlay } from "@/components/dictation-overlay";
 import { useWorkspaceBootstrap } from "@/hooks/use-workspace-bootstrap";
 import { isElectronApp } from "@/lib/electron-bridge";
 import { isEditableFile } from "@/lib/markdown-serialize";
@@ -18,6 +19,9 @@ import { cn } from "@/lib/utils";
 
 export function AppShell() {
   useWorkspaceBootstrap();
+  const [overlayView, setOverlayView] = useState(
+    () => typeof window !== "undefined" && window.location.hash === "#overlay",
+  );
   const workspaceScreen = useProjectStore((s) => s.workspaceScreen);
   const goHome = useProjectStore((s) => s.goHome);
   const config = useProjectStore((s) => s.config);
@@ -29,13 +33,21 @@ export function AppShell() {
   const toggleLeftSidebar = useProjectStore((s) => s.toggleLeftSidebar);
   const toggleRightSidebar = useProjectStore((s) => s.toggleRightSidebar);
   const setProjectTitle = useProjectStore((s) => s.setProjectTitle);
-  const updateActiveFileContent = useProjectStore((s) => s.updateActiveFileContent);
 
   const activeFilePath = config.activeFilePath;
   const activeFileEntry = activeFilePath ? openFiles.get(activeFilePath) : null;
   const canEdit = activeFilePath ? isEditableFile(activeFilePath) : false;
 
   const focusModeRef = useRef(focusMode);
+
+  useEffect(() => {
+    const syncOverlayView = () => {
+      setOverlayView(window.location.hash === "#overlay");
+    };
+    syncOverlayView();
+    window.addEventListener("hashchange", syncOverlayView);
+    return () => window.removeEventListener("hashchange", syncOverlayView);
+  }, []);
 
   useEffect(() => {
     focusModeRef.current = focusMode;
@@ -80,6 +92,10 @@ export function AppShell() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [focusMode, setFocusMode]);
+
+  if (overlayView) {
+    return <DictationOverlay />;
+  }
 
   if (workspaceScreen === "home") {
     return <HomeScreen />;

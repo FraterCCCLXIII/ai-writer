@@ -8,10 +8,13 @@ import {
   Heading2,
   Heading3,
   Italic,
+  Loader2,
   List,
   ListOrdered,
+  Mic,
   Quote,
   Redo2,
+  Square,
   Strikethrough,
   Type,
   Underline,
@@ -31,6 +34,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { InlineAction } from "@/lib/ai/types";
+import type { DictationPhase } from "@/lib/dictation/types";
 
 function ToolbarIconButton({
   title,
@@ -63,9 +67,18 @@ function ToolbarIconButton({
 
 type Props = {
   onInline: (action: InlineAction, editor: Editor) => void;
+  dictation?: {
+    available: boolean;
+    enabled: boolean;
+    phase: DictationPhase;
+    onToggle: (payload: {
+      mode: "insert" | "replace";
+      targetRange?: { from: number; to: number };
+    }) => void;
+  };
 };
 
-export function EditorToolbar({ onInline }: Props) {
+export function EditorToolbar({ onInline, dictation }: Props) {
   const { editor } = useEditor();
 
   if (!editor) return null;
@@ -254,6 +267,55 @@ export function EditorToolbar({ onInline }: Props) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      {dictation?.available ? (
+        <>
+          <Separator orientation="vertical" className="mx-1 h-6" />
+          <Button
+            type="button"
+            variant={dictation.phase === "recording" ? "secondary" : "ghost"}
+            size="sm"
+            className={cn(
+              "h-8 gap-1.5 px-2 text-xs",
+              dictation.phase === "recording" && "border border-border text-foreground",
+            )}
+            disabled={!dictation.enabled || dictation.phase === "transcribing" || dictation.phase === "rewriting"}
+            title={
+              !dictation.enabled
+                ? "Enable dictation in Settings to record in the desktop app."
+                : editor.state.selection.empty
+                  ? "Start or stop dictation and insert at the cursor."
+                  : "Start or stop dictation and replace the current selection."
+            }
+            onClick={() =>
+              dictation.onToggle({
+                mode: editor.state.selection.empty ? "insert" : "replace",
+                targetRange: {
+                  from: editor.state.selection.from,
+                  to: editor.state.selection.to,
+                },
+              })
+            }
+          >
+            {dictation.phase === "recording" ? (
+              <Square className="h-3.5 w-3.5 fill-current text-red-500" />
+            ) : dictation.phase === "transcribing" ||
+              dictation.phase === "rewriting" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Mic className="h-3.5 w-3.5" />
+            )}
+            <span>
+              {dictation.phase === "recording"
+                ? "Stop"
+                : dictation.phase === "transcribing"
+                  ? "Transcribing"
+                  : dictation.phase === "rewriting"
+                    ? "Polishing"
+                    : "Dictate"}
+            </span>
+          </Button>
+        </>
+      ) : null}
       </div>
     </div>
   );

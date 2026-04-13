@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 "use strict";
 
 const { contextBridge, ipcRenderer } = require("electron");
@@ -30,6 +31,49 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("fs:write-workspace-config", folderPath, contents),
   hasLegacyWorkspace: (folderPath) =>
     ipcRenderer.invoke("fs:has-legacy-workspace", folderPath),
+
+  // Dictation
+  dictationProcessAudio: (request) =>
+    ipcRenderer.invoke("dictation:process-audio", request),
+  dictationGetOllamaStatus: (baseUrl) =>
+    ipcRenderer.invoke("dictation:get-ollama-status", baseUrl),
+  dictationLaunchOllama: (baseUrl) =>
+    ipcRenderer.invoke("dictation:launch-ollama", baseUrl),
+  dictationPullOllamaModel: (baseUrl, modelName) =>
+    ipcRenderer.invoke("dictation:pull-ollama-model", baseUrl, modelName),
+  dictationBootstrap: () => ipcRenderer.invoke("dictation:bootstrap"),
+  dictationRequestMicrophoneAccess: () =>
+    ipcRenderer.invoke("dictation:request-microphone-access"),
+  dictationRequestSystemAccess: () =>
+    ipcRenderer.invoke("dictation:request-system-access"),
+  dictationCaptureTarget: () => ipcRenderer.invoke("dictation:capture-target"),
+  dictationUpdateSettings: (settings) =>
+    ipcRenderer.invoke("dictation:update-settings", settings),
+  dictationPrepareSpeechModel: () =>
+    ipcRenderer.invoke("dictation:prepare-speech-model"),
+  dictationPushStatus: (status) => ipcRenderer.send("dictation:push-status", status),
+  dictationSubscribeStatus: (callback) => {
+    const channel = "dictation:status";
+    const handler = (_event, status) => {
+      callback(status);
+    };
+    ipcRenderer.on(channel, handler);
+    return () => {
+      ipcRenderer.removeListener(channel, handler);
+    };
+  },
+  dictationSubscribeHotkey: (callback) => {
+    const channel = "dictation:hotkey";
+    const handler = (_event, event) => {
+      callback(event);
+    };
+    ipcRenderer.on(channel, handler);
+    return () => {
+      ipcRenderer.removeListener(channel, handler);
+    };
+  },
+  openExternal: (targetUrl) => ipcRenderer.invoke("system:open-external", targetUrl),
+  showMainWindow: () => ipcRenderer.invoke("system:show-main-window"),
 
   // Window controls
   windowMinimize: () => ipcRenderer.invoke("window:minimize"),

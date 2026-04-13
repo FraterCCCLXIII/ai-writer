@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 /**
  * After `next build` with `output: "standalone"`, copy public assets into the
  * standalone bundle so the embedded server can serve them.
